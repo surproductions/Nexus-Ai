@@ -188,50 +188,22 @@ struct OutputStreamParser {
         guard !stopped else { return [] }
         buffer += piece
         var events: [GenerationEvent] = []
-
-        // Stop strings (checked in the visible stream only).
-        if !inThinking {
-            for s in stops where !s.isEmpty {
-                if let r = buffer.range(of: s) {
-                    let head = String(buffer[..<r.lowerBound])
-                    buffer = ""
-                    stopped = true
-                    events.append(contentsOf: drain(head, final: true))
-                    return events
-                }
-            }
-        }
-        events.append(contentsOf: drain(nil, final: false))
-        return events
-    }
-
-    mutating func finish() -> [GenerationEvent] {
-        guard !stopped else { return [] }
-        stopped = true
-        let rest = buffer
-        buffer = ""
-        return emit(rest)
-    }
-
-    private mutating func drain(_ explicit: String?, final: Bool) -> [GenerationEvent] {
-        if let explicit { buffer = explicit }
-        var events: [GenerationEvent] = []
         while true {
             let marker = inThinking ? close : open
-            if let marker, let r = buffer.range(of: marker) {
-                let head = String(buffer[..<r.lowerBound])
-                events.append(contentsOf: emit(head))
-                buffer = String(buffer[r.upperBound...])
-                inThinking.toggle()
-                if !inThinking { buffer = String(buffer.drop(while: { $0 == "\n" })) }
-                continue
+            let markerRange = marker.flatMap { buffer.range(of: $0) }
+            // Stop strings apply to visible text, and only if they come before the next marker.
+            if !inThinking, let stop = firstStop(in: buffer),
+               markerRange == nil || stop.lowerBound <= markerRange!.lowerBound {
+                events.append(contentsOf: emit(String(buffer[..<stop.lowerBound])))
+                buffer = ""
+                stopped = true
+                return events
             }
-            break
-        }
-        if final {
-            events.append(contentsOf: emit(buffer))
-            buffer = ""
-            return events
+            guard let r = markerRange else { break }
+            events.append(contentsOf: emit(String(buffer[..<r.lowerBound])))
+            buffer = String(buffer[r.upperBound...])
+            inThinking.toggle()
+            if !inThinking { buffer = String(buffer.drop(while: { $0 == "\n" })) }
         }
         // Hold back the longest suffix that could begin a marker or stop string.
         let candidates = [open, close].compactMap { $0 } + (inThinking ? [] : stops)
@@ -243,6 +215,19 @@ struct OutputStreamParser {
             events.append(contentsOf: emit(head))
         }
         return events
+    }
+
+    mutating func finish() -> [GenerationEvent] {
+        guard !stopped else { return [] }
+        stopped = true
+        var rest = buffer
+        buffer = ""
+        if !inThinking, let stop = firstStop(in: rest) { rest = String(rest[..<stop.lowerBound]) }
+        return emit(rest)
+    }
+
+    private func firstStop(in text: String) -> Range<String.Index>? {
+        stops.filter { !$0.isEmpty }.compactMap { text.range(of: $0) }.min { $0.lowerBound < $1.lowerBound }
     }
 
     private func emit(_ s: String) -> [GenerationEvent] {

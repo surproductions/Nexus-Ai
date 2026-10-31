@@ -35,6 +35,17 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Logic unit tests (calculator, stream parser, prompts, classifier, registry, embeddings)
+        run: |
+          set -euo pipefail
+          xcrun swiftc -swift-version 5 -O \
+            Tests/LogicTests/Shim.swift Tests/LogicTests/main.swift \
+            NexusAI/Tools/Calculator.swift NexusAI/Inference/InferenceTypes.swift \
+            NexusAI/Routing/TaskClassifier.swift NexusAI/Reasoning/Agents.swift \
+            NexusAI/Registry/ModelRegistry.swift NexusAI/Memory/Embedder.swift \
+            -o logictests
+          ./logictests
+
       - name: Fetch llama.cpp XCFramework (${{ env.LLAMA_TAG }})
         run: |
           set -euo pipefail
@@ -87,7 +98,7 @@ jobs:
           unzip -l NexusAI.ipa | tail -3
           shasum -a 256 NexusAI.ipa | tee NexusAI.ipa.sha256
           # Complete, buildable Xcode project (generated project + vendored framework + sources)
-          zip -qry NexusAI-XcodeProject.zip NexusAI NexusAI.xcodeproj Vendor project.yml README.md docs -x "*.DS_Store"
+          zip -qry NexusAI-XcodeProject.zip NexusAI NexusAI.xcodeproj Vendor project.yml README.md docs Tests -x "*.DS_Store"
           ls -la NexusAI.ipa NexusAI-XcodeProject.zip
 
       - uses: actions/upload-artifact@v4

@@ -14,30 +14,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct NexusAIApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var app = AppModel()
 
     var body: some Scene {
         WindowGroup {
-            BootstrapView()
-        }
-    }
-}
-
-/// Temporary bootstrap screen used while the full UI is assembled.
-struct BootstrapView: View {
-    @StateObject private var settings = SettingsStore()
-    @ObservedObject private var hardware = HardwareMonitor.shared
-
-    var body: some View {
-        List {
-            Section("Device") {
-                Text(hardware.device.marketingName)
-                Text(ByteCountFormatter.memory(Int64(hardware.device.physicalMemory)))
-                Text(hardware.tier.rawValue)
-                Text(AppleIntelligence.status.reason)
-            }
-            Section("Models") {
-                ForEach(ModelRegistry.catalog) { Text($0.name) }
-            }
+            RootView(settings: app.settings)
+                .environmentObject(app)
         }
     }
 }

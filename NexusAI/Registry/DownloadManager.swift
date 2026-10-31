@@ -146,8 +146,8 @@ final class DownloadManager: NSObject, ObservableObject {
     fileprivate func updateProgress(key: String, written: Int64, total: Int64) {
         guard var item = items[key] else { return }
         let now = Date()
-        if let (t, w) = speedSamples[key], now.timeIntervalSince(t) > 1 {
-            item.bytesPerSecond = Double(written - w) / now.timeIntervalSince(t)
+        if let sample = speedSamples[key], now.timeIntervalSince(sample.0) > 1 {
+            item.bytesPerSecond = Double(written - sample.1) / now.timeIntervalSince(sample.0)
             speedSamples[key] = (now, written)
         } else if speedSamples[key] == nil {
             speedSamples[key] = (now, written)
