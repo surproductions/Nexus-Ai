@@ -186,8 +186,11 @@ final class CancellationFlag: @unchecked Sendable {
     func cancel() { lock.lock(); _cancelled = true; lock.unlock() }
 }
 
-extension String {
+extension StringProtocol {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+extension String {
 
     func truncated(to max: Int) -> String {
         count <= max ? self : String(prefix(max)) + "…"
