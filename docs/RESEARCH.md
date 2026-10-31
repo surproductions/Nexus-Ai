@@ -53,3 +53,32 @@ Excluded: gated repositories that require a Hugging Face login (cannot be downlo
 * Physical RAM from `ProcessInfo.physicalMemory`; the real per-app limit from `os_proc_available_memory()`.
 * iPhone 15 Pro/16/17 have 8 GB; iPhone 17 Pro/Pro Max/Air have 12 GB. Without the increased-memory-limit entitlement, an app typically gets roughly half to two-thirds of RAM.
 * Metal GPU family is detected (Apple 7–9+). All supported models offload every layer to the GPU.
+
+## Expansion research (October 2026)
+
+### Target device
+iPhone 18 Pro Max: A20 Pro (TSMC N2), 12 GB LPDDR5X, iOS 27, released September 18, 2026; identifiers `iPhone19,2/3/7` (Apple specification page and device databases). At 12 GB the per-app limit leaves room for 4B models with vision adapters and long contexts. 9B IQ4_XS fits only when the admission check confirms headroom.
+
+### Mandated initial models
+| Model | Verified | Notes |
+|---|---|---|
+| LFM2.5 1.2B Instruct (Liquid AI) | `lfm2` architecture supported at llama.cpp b12018; Q4_K_M 731 MB, SHA-256 from Hugging Face | ChatML template with BOS; LFM Open License v1.0 |
+| FunctionGemma 270M | `gemma3` architecture; Q8_0 292 MB | Developer-role declarations; output `<start_function_call>call:name{arg:<escape>v<escape>}<end_function_call>`; Gemma Terms of Use. Base model, so calls are validated |
+| Gemma 4 E2B, Qwen3.5 2B/4B | Already in v1.0 registry | Default Thinking / Max candidates |
+| Apple Foundation Models | iOS 26 API (weak-linked) | Instant fallback; zero download |
+
+### Image/video generation options evaluated
+| Option | Decision |
+|---|---|
+| Apple Image Playground `ImageCreator` (iOS 18.4+) | Adopted: on-device, no download. iOS 27 additions (photoreal, sizes, editing) need the iOS 27 SDK |
+| Apple Core ML Stable Diffusion 2.1 (split-einsum, 6-bit palettized, 1.14 GB) via `ml-stable-diffusion` 1.1.1 | Adopted: Neural Engine, txt2img + img2img, safety checker |
+| SDXL / FLUX on device | Rejected for now: minutes per image and memory risk on phones |
+| Local text/image-to-video (Wan, LTX, HunyuanVideo, …) | Rejected: memory and compute far beyond a phone |
+| OpenAI gpt-image + Sora 2 API | Adopted (connected): generation, edits, image-to-video, remix |
+| fal.ai queue API (FLUX, FLUX Kontext, Veo 3, Kling 2.1) | Adopted (connected): endpoints are configurable data |
+
+### Video understanding
+Implemented entirely with Apple frameworks: AVFoundation (metadata, frame extraction, audio export), luminance-difference scene detection, Vision (OCR, classification), llama.cpp vision models for frame captions, and Speech (on-device transcription in 55-second chunks).
+
+### Connectors
+Firecrawl v2 (`/v2/search`, `/v2/scrape`), Tavily (`/search`), Brave (`/res/v1/web/search`), and a Model Context Protocol client (JSON-RPC 2.0 over Streamable HTTP: `initialize`, `tools/list`, `tools/call`, session header, SSE or JSON responses).

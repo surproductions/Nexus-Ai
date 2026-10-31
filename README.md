@@ -20,6 +20,13 @@ Install instructions: [docs/INSTALL.md](docs/INSTALL.md)
 * **Privacy**: an Offline-Only switch, per-feature network consent (all off by default except model downloads), a local log of every outbound request, Keychain for API keys, AES-256-GCM encryption of conversations/memories/documents, optional Face ID lock, no telemetry.
 * **Evaluation & benchmarks**: an in-app performance benchmark (load time, TTFT, decode and prompt tok/s, peak memory, thermal, battery) and a 29-case evaluation suite with automatic graders, including executed JavaScript tests and hallucination probes. It runs identically against local models and cloud providers.
 
+* **Creative Studio**: image generation (Apple Image Playground and Stable Diffusion 2.1 on device; OpenAI and FLUX when connected), natural-language image editing, background removal and replacement, video generation and remix (connected providers only, since video generation isn't practical on a phone), vertical reframing and scene extension, a media library with provenance metadata, and export to Photos.
+* **Media understanding**: multi-image conversations with follow-up context, and on-device video analysis (scene detection, key frames, OCR, captions, speech transcription) with timestamped answers and clickable timestamps.
+* **Connectors**: Firecrawl, Tavily, Brave, and any MCP server (Streamable HTTP), all opt-in.
+* **Mode configuration**: per-memory-class model lists for Instant (LFM2.5 1.2B), Thinking (Gemma 4 E2B) and Max (Qwen3.5 4B) by default, editable in Settings. Auto-configure re-ranks them from measurements on your iPhone. Connected Max sends demanding Max tasks to a frontier provider when you enable it.
+
+See [docs/CAPABILITIES.md](docs/CAPABILITIES.md) for what runs locally, what's partial, what needs a connected provider, and what isn't practical.
+
 ## Project layout
 
 ```
@@ -39,6 +46,7 @@ docs/               Architecture, research notes, install, benchmarks, limitatio
 * [Research & technology decisions](docs/RESEARCH.md)
 * [Installation & signing](docs/INSTALL.md)
 * [Benchmarks & evaluation methodology](docs/BENCHMARKS.md)
+* [Capability matrix (local / partial / connected / not practical)](docs/CAPABILITIES.md)
 * [Known limitations](docs/LIMITATIONS.md)
 
 ## Honest status

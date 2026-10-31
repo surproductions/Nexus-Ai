@@ -8,7 +8,10 @@ The app was developed in a Linux container and compiled on GitHub's macOS runner
 * vision through `mtmd` with each model's `mmproj` adapter;
 * background downloads of multi-GB files and SHA-256 verification time;
 * voice mode (VAD thresholds were chosen from typical iPhone microphone levels and may need tuning);
-* Apple Foundation Models streaming on iOS 26 devices.
+* Apple Foundation Models streaming on iOS 26/27 devices.
+* **None of the requested target-device benchmarks have been run.** The iPhone 18 Pro Max model selection uses initial candidates (LFM2.5 → Instant, Gemma 4 E2B → Thinking, Qwen3.5 4B → Max) until you run *Settings → Model configuration → Auto-configure*, which measures every installed model on your phone and rewrites the configuration.
+* Creative Studio providers: Image Playground, Core ML Stable Diffusion, OpenAI (gpt-image, Sora 2) and fal.ai endpoints are implemented against their documented APIs but untested with live keys. fal.ai model parameters vary by endpoint.
+* FunctionGemma is the base (not fine-tuned) model. Its tool proposals are often wrong, which is why every proposal is validated and rejected when inconsistent.
 
 Please report issues with device model, iOS version and the trace (long-press a message → Reasoning trace).
 
@@ -37,3 +40,10 @@ Please report issues with device model, iOS version and the trace (long-press a 
 * Generation stops when the app is backgrounded (iOS policy); downloads continue.
 * The simulator is unsupported (the llama.cpp xcframework has no simulator slice).
 * JavaScript evaluation for tools and tests uses JavaScriptCore on a separate thread with a 3-second wait. A runaway script cannot be force-killed and keeps its thread busy until it finishes.
+
+## Creative Studio
+* Video generation is only available through connected providers (see CAPABILITIES.md for why).
+* Image Playground styles are limited to Animation/Illustration/Sketch on the iOS 26 SDK used for the build.
+* Local Stable Diffusion output is 512×512. Edits re-imagine the whole image, and there's no local inpainting.
+* Content safety: on-device prompt screening blocks sexual content, sexualized edits of photos of real people, and deceptive documents. Stable Diffusion runs Apple's safety checker, and remote providers apply their own policies. No filter is perfect.
+* Generation progress is shown only when the provider reports it (step counts for Stable Diffusion, percentages for OpenAI video); otherwise an indeterminate indicator is shown.
