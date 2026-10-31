@@ -47,4 +47,4 @@ The app compiles for iOS on CI and its logic tests pass on every build. It has *
 
 ## Licenses
 
-App source: MIT. llama.cpp/ggml: MIT. Model weights are not redistributed; they download from their publishers under their own licenses (Apache-2.0, MIT, Llama 3.2 Community License).
+App source: no license file has been added yet. Choose one before redistributing. llama.cpp/ggml: MIT. Model weights are not redistributed; they download from their publishers under their own licenses (Apache-2.0, MIT, Llama 3.2 Community License).
