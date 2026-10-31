@@ -89,7 +89,6 @@ final class LlamaRuntime: @unchecked Sendable {
         let start = Date()
         var mp = llama_model_default_params()
         mp.n_gpu_layers = config.gpuLayers
-        mp.use_mmap = true
         if let progress {
             mp.progress_callback = { value, userData in
                 guard let userData else { return true }
