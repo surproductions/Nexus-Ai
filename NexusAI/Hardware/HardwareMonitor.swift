@@ -107,7 +107,18 @@ final class HardwareMonitor: ObservableObject {
     }
 
     /// The memory the app could use in total right now: what it already holds plus what iOS will still grant.
-    var memoryBudget: UInt64 { availableMemory + appFootprint }
+    /// Memory iOS will let the app use right now. `os_proc_available_memory()` returns 0 when iOS doesn't report a
+    /// limit for the process; we then fall back to an estimate of the typical per-app limit (about 55% of RAM).
+    var usableMemory: UInt64 {
+        if availableMemory > 0 { return availableMemory }
+        let estimate = UInt64(Double(device.physicalMemory) * 0.55)
+        return estimate > appFootprint ? estimate - appFootprint : 0
+    }
+
+    var memoryBudget: UInt64 { usableMemory + appFootprint }
+
+    /// User override (Settings → Hardware & performance): skip the admission check.
+    var allowOversizedModels: Bool { UserDefaults.standard.bool(forKey: "allowOversizedModels") }
 
     var tier: HardwareTier {
         let gb = Double(device.physicalMemory) / 1_073_741_824
@@ -145,9 +156,9 @@ final class HardwareMonitor: ObservableObject {
     func canLoad(_ entry: ModelEntry, context: Int, vision: Bool, reclaimable: UInt64) -> (ok: Bool, required: UInt64, available: UInt64) {
         refreshMemory()
         let required = entry.estimatedMemory(context: context, withVision: vision)
-        let available = availableMemory + reclaimable
-        let safety: Double = thermalState == .critical ? 0.6 : 0.82
-        return (Double(required) < Double(available) * safety, required, available)
+        let available = usableMemory + reclaimable
+        let safety: Double = thermalState == .critical ? 0.6 : 0.85
+        return (allowOversizedModels || Double(required) < Double(available) * safety, required, available)
     }
 
     /// Largest context that fits for a model (halving down to 1024).

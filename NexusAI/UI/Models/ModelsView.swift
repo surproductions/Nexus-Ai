@@ -125,7 +125,7 @@ struct ModelsView: View {
     private func fit(_ e: ModelEntry) -> Fit {
         let ctx = 2048
         let need = Double(e.estimatedMemory(context: ctx, withVision: false))
-        let budget = Double(hardware.memoryBudget > 0 ? hardware.memoryBudget : hardware.device.physicalMemory / 2)
+        let budget = Double(hardware.memoryBudget)
         if need < budget * 0.6 { return .good }
         if need < budget * 0.85 { return .tight }
         return .no
@@ -199,7 +199,7 @@ struct ModelRow: View {
         switch fit {
         case .good: Text("Fits").font(.caption2).foregroundStyle(.green)
         case .tight: Text("Tight").font(.caption2).foregroundStyle(.orange)
-        case .no: Text("Too large").font(.caption2).foregroundStyle(.red)
+        case .no: Text("May not fit").font(.caption2).foregroundStyle(.red)
         }
     }
 }
@@ -281,6 +281,7 @@ struct ModelDetailView: View {
                 if let p = entry.visionProjector { StatRow(label: "Vision adapter", value: ByteCountFormatter.file(p.sizeBytes)) }
                 StatRow(label: "Native context", value: "\(entry.nativeContext / 1024)K tokens")
                 StatRow(label: "Est. memory @ 4K ctx", value: ByteCountFormatter.memory(Int64(entry.estimatedMemory(context: 4096, withVision: false))))
+                StatRow(label: "App can use now", value: ByteCountFormatter.memory(Int64(hardware.memoryBudget)))
                 StatRow(label: "Chat format", value: entry.promptFormat.rawValue)
             }
             Section {

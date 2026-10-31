@@ -20,10 +20,17 @@ struct PerformanceView: View {
             Section("Memory (live)") {
                 StatRow(label: "Physical RAM", value: ByteCountFormatter.memory(Int64(hw.device.physicalMemory)))
                 StatRow(label: "App footprint", value: ByteCountFormatter.memory(Int64(hw.appFootprint)))
-                StatRow(label: "Still available to app", value: ByteCountFormatter.memory(Int64(hw.availableMemory)))
+                StatRow(label: "Still available to app", value: hw.availableMemory > 0 ? ByteCountFormatter.memory(Int64(hw.availableMemory)) : "Not reported (estimated \(ByteCountFormatter.memory(Int64(hw.usableMemory))))")
                 MeterBar(value: hw.memoryBudget > 0 ? Double(hw.appFootprint) / Double(hw.memoryBudget) : 0,
                          tint: Double(hw.appFootprint) / Double(max(1, hw.memoryBudget)) > 0.8 ? .red : .accentColor)
                 StatRow(label: "Memory warnings", value: "\(hw.memoryWarnings)")
+            }
+            Section {
+                Toggle("Allow models that may not fit", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "allowOversizedModels") },
+                    set: { UserDefaults.standard.set($0, forKey: "allowOversizedModels"); hw.refresh() }))
+            } header: { Text("Memory safety") } footer: {
+                Text("NEXUS normally refuses to load a model whose estimated memory exceeds what iOS lets this app use, because iOS would close the app. Turn this on to try anyway; if iOS closes NEXUS, turn it off or pick a smaller model or shorter context. Sideloaded builds signed without the Increased Memory Limit entitlement get a lower limit.")
             }
             Section("Thermal & power") {
                 StatRow(label: "Thermal state", value: hw.thermalLabel, mono: false)

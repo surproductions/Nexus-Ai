@@ -94,7 +94,14 @@ for e in ModelRegistry.catalog {
     check(e.file.sizeBytes > 100_000_000, "\(e.id) has a size")
     check(e.file.url.host == "huggingface.co" && e.file.url.path.contains(e.sourceRepo), "\(e.id) URL matches repo")
     if let p = e.visionProjector { check(p.sha256?.count == 64, "\(e.id) projector SHA-256") }
-    check(e.estimatedMemory(context: 4096, withVision: false) > UInt64(e.file.sizeBytes), "\(e.id) memory estimate exceeds weights")
+    check(e.estimatedMemory(context: 4096, withVision: false) > UInt64(Double(e.file.sizeBytes) * ModelEntry.residentWeightFraction), "\(e.id) memory estimate exceeds resident weights")
+}
+
+// Typical 3–4B Q4 models must not be rejected on a 12 GB phone (~6.6 GB usable at 55%)
+let budget12 = 12.0 * 1_073_741_824 * 0.55 * 0.85
+for id in ["qwen3.5-4b-q4km", "gemma-4-e2b-q4km", "phi-4-mini-q4km", "qwen3.5-2b-q4km", "lfm2.5-1.2b-q4km"] {
+    let e = ModelRegistry.catalog.first { $0.id == id }!
+    check(Double(e.estimatedMemory(context: 4096, withVision: false)) < budget12, "\(id) fits a 12 GB phone at 4K context")
 }
 
 // MARK: Embedder

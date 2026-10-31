@@ -94,8 +94,13 @@ struct ModelEntry: Codable, Identifiable, Hashable, Sendable {
     func prior(_ c: TaskCategory) -> Double { priors[c.rawValue] ?? priors["chat"] ?? 4 }
 
     /// Estimated resident memory for a given context length.
+    /// Weights are memory-mapped from disk by llama.cpp, so iOS can page clean weight pages back out instead of
+    /// counting them fully against the app's limit. We count 65% of the file as resident: still conservative,
+    /// but no longer rejecting models that comparable iOS llama.cpp apps run on the same hardware.
+    static let residentWeightFraction = 0.65
+
     func estimatedMemory(context: Int, withVision: Bool) -> UInt64 {
-        let weights = UInt64(file.sizeBytes)
+        let weights = UInt64(Double(file.sizeBytes) * Self.residentWeightFraction)
         let kv = UInt64(kvBytesPerToken * context)
         let compute: UInt64 = 300 * 1_048_576 + UInt64(Double(weights) * 0.04)
         let vision = withVision ? UInt64(Double(visionProjector?.sizeBytes ?? 0) * 1.15) + 150 * 1_048_576 : 0
