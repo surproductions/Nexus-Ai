@@ -56,7 +56,7 @@ enum ChatRole: String, Codable, Sendable {
 }
 
 struct Attachment: Codable, Hashable, Identifiable, Sendable {
-    enum Kind: String, Codable, Sendable { case image, document }
+    enum Kind: String, Codable, Sendable { case image, document, video }
     var id: UUID = UUID()
     var kind: Kind
     var filename: String
@@ -65,6 +65,10 @@ struct Attachment: Codable, Hashable, Identifiable, Sendable {
     /// Locally extracted text (OCR / PDF text / Vision analysis). Never leaves the device unless a cloud provider is used.
     var extractedText: String?
     var documentID: UUID?
+    /// Set for media created in Creative Studio (links to the library item).
+    var mediaID: UUID?
+
+    var fileURL: URL { Paths.attachments.appendingPathComponent(relativePath).standardizedFileURL }
 }
 
 struct TraceStep: Codable, Hashable, Identifiable, Sendable {

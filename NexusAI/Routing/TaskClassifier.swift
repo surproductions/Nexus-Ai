@@ -14,6 +14,13 @@ struct TaskProfile: Sendable, Equatable {
     var codeLanguage: String?
     var isAmbiguous: Bool
     var signals: [String]
+    var creativeIntent: CreativeIntent = .none
+    /// Imperative edit phrasing ("make it warmer", "remove the …") that applies to media in context.
+    var wantsMediaEdit: Bool = false
+}
+
+enum CreativeIntent: String, Sendable, Equatable {
+    case none, image, video
 }
 
 enum TaskClassifier {
@@ -92,8 +99,37 @@ enum TaskClassifier {
         }
         let ambiguous = words <= 3 && category != .quick && !hasImages && !hasDocuments
 
+        let creative = creativeIntent(text)
+        if creative != .none { signals.append("\(creative.rawValue) generation") }
+        let edit = mediaEdit(text)
+        if creative != .none { category = creative == .image ? .creative : .creative }
         return TaskProfile(category: category, complexity: complexity, needsCurrentInfo: needsCurrent, hasImages: hasImages,
-                           hasDocuments: hasDocuments, mathExpression: expr, wantsDateTime: wantsDate, unitConversion: units,
-                           wantsCode: category == .coding, codeLanguage: lang, isAmbiguous: ambiguous, signals: signals)
+                           hasDocuments: hasDocuments, mathExpression: creative == .none ? expr : nil, wantsDateTime: wantsDate,
+                           unitConversion: units, wantsCode: category == .coding, codeLanguage: lang,
+                           isAmbiguous: ambiguous && creative == .none, signals: signals,
+                           creativeIntent: creative, wantsMediaEdit: edit)
+    }
+
+    private static let requestLead = #"^(please\s+|can you\s+|could you\s+|would you\s+|i want( you)? to\s+|i'd like( you)? to\s+|let's\s+|now\s+|also\s+)*"#
+
+    /// Detects a request to *generate* media (imperative), not a question about media.
+    static func creativeIntent(_ text: String) -> CreativeIntent {
+        let t = text.lowercased()
+        let verbs = "(create|generate|make|render|produce|draw|paint|design|illustrate|sketch|imagine|animate|film|shoot|give me|show me)"
+        let videoNouns = "(video|clip|animation|footage|movie|reel|short film|cinematic shot|timelapse|time-lapse)"
+        let imageNouns = "(image|picture|photo|photograph|illustration|drawing|painting|logo|wallpaper|poster|icon|artwork|concept art|render|portrait|sticker|banner|thumbnail|mockup)"
+        let lead = requestLead
+        if t.range(of: lead + verbs + #"\b[^.?!]{0,60}?\b"# + videoNouns, options: .regularExpression) != nil ||
+            t.hasPrefix("text to video") || t.hasPrefix("animate this") { return .video }
+        if t.range(of: lead + verbs + #"\b[^.?!]{0,60}?\b"# + imageNouns, options: .regularExpression) != nil ||
+            t.range(of: lead + "(draw|paint|sketch|illustrate|design a logo)", options: .regularExpression) != nil { return .image }
+        return .none
+    }
+
+    /// Imperative edit instructions that only make sense against media already in the conversation.
+    static func mediaEdit(_ text: String) -> Bool {
+        let t = text.lowercased()
+        let pattern = requestLead + #"(make (it|this|the|them)|change the|replace the|remove the|add (a|an|some|more)|increase|decrease|turn (it|the)|extend (this|the|it)|create (a )?vertical|make a vertical|crop|brighten|darken|smooth|swap the|put (it|the)|use a different|create (three|two|four|\d) (different )?versions|more realistic)"#
+        return t.range(of: pattern, options: .regularExpression) != nil
     }
 }

@@ -47,7 +47,7 @@ struct ModelRouter {
     func candidates(for profile: TaskProfile, mode: IntelligenceMode) -> [Candidate] {
         var list: [Candidate] = []
         let preferredCtx = hardware.suggestedContext(for: mode)
-        for entry in ModelRegistry.allEntries where models.isInstalled(entry.id) {
+        for entry in ModelRegistry.allEntries where entry.isChatModel && models.isInstalled(entry.id) {
             let visionReady = models.visionInstalled.contains(entry.id)
             let wantVision = profile.hasImages && visionReady
             let isLoaded = models.loadedEntry?.id == entry.id
@@ -123,6 +123,32 @@ struct ModelRouter {
             }
             throw NexusError.unavailable("No installed model fits in the memory currently available. Close other apps or choose a smaller model.")
         }
+        // Connected Max: hand substantially demanding Max tasks to the user's frontier provider.
+        if mode == .max, settings.cloudForMax, let cloud = all.first(where: { Self.isCloud($0.target) }),
+           profile.complexity >= 0.45 || [.research, .coding, .planning, .reasoning, .math].contains(profile.category) {
+            var d = decision(from: cloud, reason: "Connected Max: demanding \(profile.category.label.lowercased()) task sent to \(cloud.name) (remote)")
+            d.warnings = warnings
+            return d
+        }
+
+        // Configured mode policy (per memory class): first preferred model that is installed and fits.
+        let memClass = MemoryClass.detect(physicalMemory: hardware.device.physicalMemory)
+        let policy = ModePolicyStore.load(memClass)
+        for id in policy.preferred(for: mode) {
+            guard let c = all.first(where: { decision(from: $0, reason: "").modelID == id }) else { continue }
+            if profile.hasImages && !c.vision && all.contains(where: \.vision) { continue }  // keep image tasks on a vision model
+            if mode == .instant && c.quality < 3 { continue }
+            var d = decision(from: c, reason: "Preferred \(mode.title) model for \(memClass.rawValue) devices (\(policy.source) configuration)")
+            d.warnings = warnings
+            if profile.hasImages && !c.vision {
+                d.warnings.append("No vision model is ready, so images are described with Apple's on-device OCR and classifier. Download a model's vision adapter in Models for full image understanding.")
+            }
+            if mode == .max, case .local(let e) = c.target, e.parameterBillions < 5 {
+                d.warnings.append("Max Intelligence is running on a \(Calculator.format(e.parameterBillions))B on-device model. Answers are planned and verified, but they are not frontier-model quality. Connected Max (Settings) can use a cloud model for demanding tasks.")
+            }
+            return d
+        }
+
         let ranked = all.map { ($0, score($0, mode: mode)) }.sorted { $0.1 > $1.1 }
         let best = ranked[0].0
         var reason: String

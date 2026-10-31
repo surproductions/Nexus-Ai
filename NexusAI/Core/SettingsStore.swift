@@ -11,6 +11,11 @@ final class SettingsStore: ObservableObject {
     @Published var allowWebResearch: Bool { didSet { save("allowWeb", allowWebResearch); syncPolicy() } }
     @Published var allowCloud: Bool { didSet { save("allowCloud", allowCloud); syncPolicy() } }
     @Published var cloudForMax: Bool { didSet { save("cloudForMax", cloudForMax) } }
+    @Published var allowCloudGeneration: Bool { didSet { save("allowCloudGen", allowCloudGeneration); syncPolicy() } }
+    @Published var allowConnectors: Bool { didSet { save("allowConnectors", allowConnectors); syncPolicy() } }
+    @Published var useToolCaller: Bool { didSet { save("useToolCaller", useToolCaller) } }
+    @Published var uploadRetentionDays: Int { didSet { save("uploadRetention", uploadRetentionDays) } }
+    @Published var transcribeVideoAudio: Bool { didSet { save("transcribeVideo", transcribeVideoAudio) } }
     @Published var activeProviderID: String { didSet { save("activeProvider", activeProviderID) } }
     @Published var modelOverride: String { didSet { save("modelOverride", modelOverride) } }   // "" = automatic
     @Published var allowCellularDownloads: Bool { didSet { save("cellular", allowCellularDownloads) } }
@@ -35,6 +40,11 @@ final class SettingsStore: ObservableObject {
         allowWebResearch = d.object(forKey: "allowWeb") as? Bool ?? false
         allowCloud = d.object(forKey: "allowCloud") as? Bool ?? false
         cloudForMax = d.object(forKey: "cloudForMax") as? Bool ?? false
+        allowCloudGeneration = d.object(forKey: "allowCloudGen") as? Bool ?? false
+        allowConnectors = d.object(forKey: "allowConnectors") as? Bool ?? false
+        useToolCaller = d.object(forKey: "useToolCaller") as? Bool ?? true
+        uploadRetentionDays = d.object(forKey: "uploadRetention") as? Int ?? 0
+        transcribeVideoAudio = d.object(forKey: "transcribeVideo") as? Bool ?? true
         activeProviderID = d.string(forKey: "activeProvider") ?? ""
         modelOverride = d.string(forKey: "modelOverride") ?? ""
         allowCellularDownloads = d.object(forKey: "cellular") as? Bool ?? false
@@ -77,6 +87,7 @@ final class SettingsStore: ObservableObject {
     }
 
     private func syncPolicy() {
-        NetworkGate.shared.policy = .init(offlineOnly: offlineOnly, allowWebResearch: allowWebResearch, allowCloud: allowCloud)
+        NetworkGate.shared.policy = .init(offlineOnly: offlineOnly, allowWebResearch: allowWebResearch, allowCloud: allowCloud,
+                                          allowCloudGeneration: allowCloudGeneration, allowConnectors: allowConnectors)
     }
 }

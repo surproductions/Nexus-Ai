@@ -188,7 +188,7 @@ final class HardwareMonitor: ObservableObject {
         let mtl = MTLCreateSystemDefaultDevice()
         var family = "Apple GPU"
         if let mtl {
-            if mtl.supportsFamily(.apple9) { family = "Apple 9 (A17 Pro / A18 or newer)" }
+            if mtl.supportsFamily(.apple9) { family = "Apple 9+ (A17 Pro and newer, incl. A18–A20)" }
             else if mtl.supportsFamily(.apple8) { family = "Apple 8 (A15 / A16)" }
             else if mtl.supportsFamily(.apple7) { family = "Apple 7 (A14)" }
             else { family = "Apple 6 or earlier" }
@@ -216,6 +216,9 @@ final class HardwareMonitor: ObservableObject {
             "iPhone17,4": ("iPhone 16 Plus", "A18"), "iPhone17,5": ("iPhone 16e", "A18"),
             "iPhone18,1": ("iPhone 17 Pro", "A19 Pro"), "iPhone18,2": ("iPhone 17 Pro Max", "A19 Pro"),
             "iPhone18,3": ("iPhone 17", "A19"), "iPhone18,4": ("iPhone Air", "A19 Pro"),
+            // iPhone 18 Pro Max identifiers verified against published device databases (Sept 2026).
+            "iPhone19,2": ("iPhone 18 Pro Max", "A20 Pro"), "iPhone19,3": ("iPhone 18 Pro Max", "A20 Pro"),
+            "iPhone19,7": ("iPhone 18 Pro Max", "A20 Pro"),
         ]
         if let hit = table[id] { return hit }
         if id.hasPrefix("iPad") { return ("iPad (\(id))", "Apple silicon") }

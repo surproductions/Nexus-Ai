@@ -21,6 +21,8 @@ final class ModelManager: ObservableObject {
     @Published private(set) var loadedContext: Int = 0
     @Published private(set) var lastLoadMs: Int = 0
     @Published var isGenerating = false
+    /// Small auxiliary model (FunctionGemma) kept alongside the main model when memory allows.
+    @Published private(set) var utilityBackend: LlamaBackend?
 
     private let hardware: HardwareMonitor
     private var loadTask: Task<LlamaBackend, Error>?
@@ -43,8 +45,20 @@ final class ModelManager: ObservableObject {
     }
 
     static func localURL(_ entry: ModelEntry) -> URL {
-        entry.isCustom ? Paths.models.appendingPathComponent("Custom/\(entry.file.filename)")
-                       : directory(for: entry.sourceRepo).appendingPathComponent(entry.file.filename)
+        if entry.modelKind == .imageDiffusion {
+            return directory(for: entry.sourceRepo).appendingPathComponent("resources", isDirectory: true)
+        }
+        return entry.isCustom ? Paths.models.appendingPathComponent("Custom/\(entry.file.filename)")
+                              : directory(for: entry.sourceRepo).appendingPathComponent(entry.file.filename)
+    }
+
+    /// Core ML diffusion resources are ready when the text encoder and a UNet are present.
+    static func diffusionReady(_ entry: ModelEntry) -> Bool {
+        let dir = localURL(entry)
+        let fm = FileManager.default
+        return fm.fileExists(atPath: dir.appendingPathComponent("TextEncoder.mlmodelc").path) &&
+            (fm.fileExists(atPath: dir.appendingPathComponent("Unet.mlmodelc").path) ||
+             fm.fileExists(atPath: dir.appendingPathComponent("UnetChunk1.mlmodelc").path))
     }
 
     static func projectorURL(_ entry: ModelEntry) -> URL? {
@@ -56,6 +70,10 @@ final class ModelManager: ObservableObject {
         var inst = Set<String>()
         var vis = Set<String>()
         for e in ModelRegistry.allEntries {
+            if e.modelKind == .imageDiffusion {
+                if Self.diffusionReady(e) { inst.insert(e.id) }
+                continue
+            }
             let url = Self.localURL(e)
             if let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber,
                e.isCustom || size.int64Value == e.file.sizeBytes {
@@ -175,6 +193,23 @@ final class ModelManager: ObservableObject {
         }
     }
 
+    /// Loads a tiny auxiliary model (e.g. the tool caller) without evicting the main chat model.
+    func utility(for entry: ModelEntry) async throws -> LlamaBackend {
+        if let u = utilityBackend, u.descriptor.kind == .local(entry.id) { return u }
+        guard installed.contains(entry.id) else { throw NexusError.modelNotInstalled(entry.name) }
+        let check = hardware.canLoad(entry, context: 2048, vision: false, reclaimable: 0)
+        guard check.ok else { throw NexusError.insufficientMemory(required: check.required, available: check.available, model: entry.name) }
+        let runtime = try await LlamaRuntime.load(modelURL: Self.localURL(entry), projectorURL: nil,
+                                                  config: LlamaConfig(contextLength: 2048, batchSize: 256, gpuLayers: 999,
+                                                                      flashAttention: true, quantizeKVCache: false,
+                                                                      threads: Int32(max(2, hardware.device.performanceCores))))
+        let backend = LlamaBackend(runtime: runtime, entry: entry)
+        utilityBackend = backend
+        return backend
+    }
+
+    func unloadUtility() { utilityBackend = nil }
+
     func unload() {
         loadedBackend = nil
         loadedEntry = nil
@@ -186,6 +221,7 @@ final class ModelManager: ObservableObject {
     private func handleMemoryPressure() {
         // Never pull a model out from under an active generation; otherwise free memory immediately.
         guard !isGenerating else { return }
+        utilityBackend = nil
         if loadedBackend != nil {
             unload()
             loadState = .failed("Model unloaded after an iOS memory warning. It will reload on the next request.")

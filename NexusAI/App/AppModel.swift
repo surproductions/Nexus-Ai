@@ -14,6 +14,9 @@ final class AppModel: ObservableObject {
     let evaluations = EvaluationStore()
     let orchestrator: Orchestrator
     let chat: ChatViewModel
+    let library = MediaLibrary()
+    let creative: CreativeService
+    let connectors = ConnectorStore()
 
     @Published var locked = false
     @Published var selectedTab = 0
@@ -24,6 +27,11 @@ final class AppModel: ObservableObject {
         orchestrator = Orchestrator(models: models, hardware: HardwareMonitor.shared, settings: settings, memory: memory,
                                     documents: documents, evaluations: evaluations)
         chat = ChatViewModel(orchestrator: orchestrator, store: conversations, documents: documents, settings: settings)
+        creative = CreativeService(library: library, models: models, settings: settings)
+        creative.orchestrator = orchestrator
+        orchestrator.creative = creative
+        chat.library = library
+        _ = MediaLibrary.purgeUploads(olderThan: settings.uploadRetentionDays)
         downloads.models = models
         downloads.allowCellular = settings.allowCellularDownloads
         settings.$allowCellularDownloads.sink { [weak self] in self?.downloads.allowCellular = $0 }.store(in: &bag)
@@ -51,6 +59,9 @@ final class AppModel: ObservableObject {
     func wipeAllData() {
         models.unload()
         Database.shared.wipeAll()
+        Database.shared.exec("DELETE FROM media;")
+        try? FileManager.default.removeItem(at: MediaFiles.directory)
+        library.reload()
         conversations.reload()
         memory.reload()
         documents.reload()

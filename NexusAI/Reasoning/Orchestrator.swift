@@ -11,6 +11,8 @@ final class TurnSession: ObservableObject {
     @Published var route: RouteDecision?
     @Published var stats: GenerationStats?
     @Published var finished = false
+    /// Media produced during the turn (generated or edited), attached to the assistant message.
+    @Published var outputAttachments: [Attachment] = []
     let cancel = CancellationFlag()
 
     @discardableResult
@@ -38,6 +40,14 @@ struct TurnInput {
     var projectID: UUID?
     var documentIDs: [UUID]
     var modelOverride: String?
+    /// Images shared earlier in the conversation (re-sent to vision models for follow-up questions).
+    var historyImages: [CGImage] = []
+    /// Text context about media in the conversation (image labels/analyses, video dossiers).
+    var mediaContext: String = ""
+    /// Most recent image/video in the conversation that edit instructions apply to.
+    var editableImage: CGImage?
+    var editableMediaID: UUID?
+    var editableVideoID: UUID?
 }
 
 /// Coordinates classification, routing, context retrieval, tools, agents, verification and synthesis.
@@ -49,6 +59,7 @@ final class Orchestrator {
     let memory: MemoryStore
     let documents: DocumentStore
     let evaluations: EvaluationStore
+    weak var creative: CreativeService?
 
     init(models: ModelManager, hardware: HardwareMonitor, settings: SettingsStore, memory: MemoryStore,
          documents: DocumentStore, evaluations: EvaluationStore) {
@@ -85,7 +96,10 @@ final class Orchestrator {
             let sources = hits.map { SourceRef(title: $0.document.title, location: "\($0.document.title), p. \($0.chunk.page)", snippet: String($0.chunk.text.prefix(160))) }
             return ToolOutput(text: text, sources: sources)
         })
-        return all.filter { names.contains($0.name) }
+        let connectorTools = ConnectorTools.tools()
+        var chosen = all.filter { names.contains($0.name) }
+        if !names.isEmpty { chosen += connectorTools }   // Firecrawl + MCP tools (gated by the Connectors permission)
+        return chosen
     }
 
     // MARK: - Entry point
@@ -103,6 +117,12 @@ final class Orchestrator {
         // Explicit memory commands are handled deterministically.
         if let command = MemoryExtractor.command(in: input.text) {
             return handleMemoryCommand(command, projectID: input.projectID, session: session, meta: meta)
+        }
+
+        // Media generation and editing requests go to Creative Studio.
+        let editsMedia = profile.wantsMediaEdit && (input.editableImage != nil || input.editableVideoID != nil)
+        if creative != nil, profile.creativeIntent != .none || editsMedia {
+            return try await handleCreative(input, profile: profile, session: session, meta: meta)
         }
 
         var budget = Budget.for(input.mode)
@@ -313,6 +333,11 @@ final class Orchestrator {
             session.end(id, detail: result.text.isEmpty ? "No text" : "\(result.text.count) characters of text", started: t0)
         }
 
+        // FunctionGemma tool-calling specialist (proposals are validated before execution).
+        if settings.useToolCaller, input.mode != .instant || profile.complexity > 0.2 {
+            await runToolCaller(input: input, profile: profile, budget: &budget, context: &context, session: session, meta: &meta)
+        }
+
         // Deterministic tools: exact math, units, dates.
         if let expr = profile.mathExpression, let v = try? Calculator.evaluate(expr) {
             let t0 = Date()
@@ -427,8 +452,10 @@ final class Orchestrator {
                 ? "On-device OCR of the attached image(s), for exact text:\n"
                 : "You cannot see the image directly. Here is an on-device analysis of it:\n") + context.imageAnalyses.joined(separator: "\n\n")
         }
+        if !input.mediaContext.isEmpty { user += "\n\n" + input.mediaContext }
         if let extra { user += "\n\n" + extra }
-        let current = PromptMessage(role: .user, content: user, images: backend.descriptor.supportsVision ? input.images : [])
+        let visionImages = input.images.isEmpty ? input.historyImages : input.images
+        let current = PromptMessage(role: .user, content: user, images: backend.descriptor.supportsVision ? visionImages : [])
 
         // Fit history to the remaining context window (newest first).
         let window = backend.descriptor.contextLength
@@ -634,6 +661,178 @@ final class Orchestrator {
         deterministicChecks(answer: answer, profile: profile, context: context, session: session, meta: &meta)
         try await verifyAndRevise(input: input, notes: context.notesText, backend: mainBackend, budget: &budget,
                                   session: session, meta: &meta, profile: profile, context: context)
+    }
+
+    // MARK: - Tool caller (FunctionGemma)
+
+    private func runToolCaller(input: TurnInput, profile: TaskProfile, budget: inout Budget, context: inout ContextPack,
+                               session: TurnSession, meta: inout MessageMeta) async {
+        let policy = ModePolicyStore.load(MemoryClass.detect(physicalMemory: hardware.device.physicalMemory))
+        guard let id = policy.toolCaller, let entry = ModelRegistry.entry(id), models.isInstalled(id) else { return }
+        let t0 = Date()
+        let step = session.begin("Tool caller", "FunctionGemma selecting a tool")
+        do {
+            let backend = try await models.utility(for: entry)
+            let prompt = FunctionCallParser.prompt(declarations: FunctionCallParser.declarations, request: input.text)
+            var raw = ""
+            let sampling = LlamaRuntime.Sampling(maxTokens: 96, temperature: 0, topK: 1, topP: 1, minP: 0, repeatPenalty: 1, seed: 1)
+            _ = try await backend.runtime.generate(prompt: prompt, images: [], sampling: sampling, onPiece: { piece in
+                raw += piece
+                return !raw.contains("<end_function_call>") && !raw.contains("<end_of_turn>")
+            }, cancel: session.cancel)
+            guard let call = FunctionCallParser.parse(raw) else {
+                session.end(step, .skipped, detail: "No tool needed", started: t0)
+                return
+            }
+            guard FunctionCallParser.validate(call, profile: profile, webAllowed: NetworkGate.shared.isAllowed(.webResearch)) else {
+                session.end(step, .skipped, detail: "Rejected proposal \(call.name)(\(call.primaryArgument.truncated(to: 60))) — inconsistent with the request", started: t0)
+                return
+            }
+            let toolName = call.name
+            if ["generate_image", "generate_video"].contains(toolName) {
+                session.end(step, .skipped, detail: "Handled by Creative Studio", started: t0)
+                return
+            }
+            if toolName == "calculator" && context.verifiedValue != nil { session.end(step, .skipped, detail: "Already computed", started: t0); return }
+            guard let tool = tools(for: [toolName]).first, budget.canCallTool || input.mode == .instant else {
+                session.end(step, .skipped, detail: "\(toolName) unavailable", started: t0)
+                return
+            }
+            budget.toolCalls += 1
+            let out = try await tool.run(call.primaryArgument)
+            context.toolResults.append("\(toolName) (selected by FunctionGemma): \(out.text.truncated(to: 2500))")
+            context.sources += out.sources
+            if !meta.toolsUsed.contains(toolName) { meta.toolsUsed.append(toolName) }
+            if tool.needsNetwork { meta.usedWeb = true }
+            session.end(step, detail: "\(toolName)(\(call.primaryArgument.truncated(to: 60))) → \(out.text.truncated(to: 100))", started: t0)
+        } catch {
+            session.end(step, .failed, detail: error.localizedDescription, started: t0)
+        }
+    }
+
+    // MARK: - Creative Studio in chat
+
+    private func handleCreative(_ input: TurnInput, profile: TaskProfile, session: TurnSession, meta: MessageMeta) async throws -> MessageMeta {
+        var meta = meta
+        guard let creative else { return meta }
+        let t0 = Date()
+        let watcher = Task { @MainActor in
+            while !Task.isCancelled {
+                if let job = creative.jobs.first, job.state == .running {
+                    session.status = job.message + (job.progress.map { " · \(Int($0 * 100))%" } ?? "")
+                }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
+        }
+        defer { watcher.cancel() }
+        var produced: [MediaItem] = []
+        var description = ""
+        do {
+            if profile.creativeIntent == .video || (profile.creativeIntent == .none && input.editableVideoID != nil && input.editableImage == nil) {
+                if profile.creativeIntent == .none, let vid = input.editableVideoID, let item = creative.library.item(vid) {
+                    let step = session.begin("Creative Studio", "Editing video")
+                    let out = try await creative.editVideo(item, instruction: input.text)
+                    session.end(step, detail: "\(out.operation) via \(out.provider)", started: t0)
+                    produced = [out]
+                    description = "Here's the edited video (\(out.operation)), made with \(out.provider)\(out.isLocal ? " on this device" : ""). The original prompt was kept so the creative intent is preserved."
+                } else {
+                    var req = Self.videoRequest(from: input.text)
+                    if let ref = input.images.first ?? input.editableImage { req.referenceImage = ref }
+                    if input.mode != .instant {
+                        let step = session.begin("Creative Studio", "Developing the video prompt")
+                        req.prompt = await creative.refinePrompt(req.prompt, video: true, mode: input.mode)
+                        session.end(step, detail: req.prompt.truncated(to: 200), started: Date())
+                    }
+                    let step = session.begin("Creative Studio", "Generating video")
+                    let item = try await creative.generateVideo(req)
+                    session.end(step, detail: "\(item.provider) · \(item.settings["duration"] ?? "")", started: t0)
+                    produced = [item]
+                    description = "Generated a \(item.settings["duration"] ?? "") video with **\(item.modelName)** via \(item.provider) (remote). Say what to change, e.g. “make the lighting darker” or “create a vertical version”, and I'll refine it."
+                }
+            } else if profile.creativeIntent == .none, let source = input.editableImage {
+                let step = session.begin("Creative Studio", "Editing image")
+                let item = creative.library.item(input.editableMediaID)
+                produced = try await creative.editImage(item, source: source, instruction: input.text, mode: input.mode)
+                session.end(step, detail: produced.first.map { "\($0.operation) via \($0.modelName)" }, started: t0)
+                if let first = produced.first {
+                    description = "Done. \(produced.count > 1 ? "\(produced.count) versions" : "Edited image") made with **\(first.modelName)** (\(first.isLocal ? "on device" : "remote: \(first.provider)"))."
+                }
+            } else {
+                var req = Self.imageRequest(from: input.text)
+                if let ref = input.images.first { req.referenceImages = [ref] }
+                if input.mode != .instant {
+                    let step = session.begin("Creative Studio", "Developing the image prompt")
+                    req.prompt = await creative.refinePrompt(req.prompt, video: false, mode: input.mode)
+                    session.end(step, detail: req.prompt.truncated(to: 200), started: Date())
+                }
+                let step = session.begin("Creative Studio", "Generating \(req.count) image\(req.count == 1 ? "" : "s")")
+                produced = try await creative.generateImages(req, mode: input.mode)
+                session.end(step, detail: produced.first.map { "\($0.modelName) · \($0.isLocal ? "on device" : "remote")" }, started: t0)
+                if let first = produced.first {
+                    description = "Created \(produced.count) image\(produced.count == 1 ? "" : "s") with **\(first.modelName)** (\(first.isLocal ? "on this device" : "remote: \(first.provider)"))." +
+                        (req.prompt != input.text ? "\n\nPrompt used: _\(req.prompt)_" : "") +
+                        "\n\nYou can ask for changes like “make it more realistic” or “create three different versions”."
+                }
+            }
+        } catch let error as CreativeError {
+            session.text = error.localizedDescription
+            meta.warnings.append(error.localizedDescription)
+            meta.modelName = "Creative Studio"
+            meta.trace = session.trace
+            return meta
+        }
+        session.outputAttachments = produced.map {
+            Attachment(kind: $0.kind == .video ? .video : .image, filename: $0.name, relativePath: "../Media/\($0.fileName)", mediaID: $0.id)
+        }
+        session.text = description
+        meta.modelName = produced.first?.modelName ?? "Creative Studio"
+        meta.usedCloud = produced.contains { !$0.isLocal }
+        meta.routeReason = "Creative Studio · \(produced.first?.provider ?? "")"
+        meta.trace = session.trace
+        meta.totalMs = Int(Date().timeIntervalSince(t0) * 1000)
+        return meta
+    }
+
+    /// Returns a frame describer backed by a vision-language model, if one is installed and fits (Thinking/Max only).
+    func frameCaptioner(mode: IntelligenceMode) async -> ((CGImage) async -> String?)? {
+        guard mode != .instant else { return nil }
+        let profile = TaskClassifier.classify("describe this image", hasImages: true)
+        guard let decision = try? router.route(profile, mode: mode, override: nil), decision.usesVisionModel,
+              let backend = try? await backend(for: decision, session: nil), backend.descriptor.supportsVision else { return nil }
+        return { image in
+            let req = GenerationRequest(system: "You describe video frames factually in one or two sentences: who/what is visible, the action, and the setting.",
+                                        messages: [PromptMessage(role: .user, content: "Describe this frame.", images: [image])],
+                                        maxTokens: 90, temperature: 0.2, enableThinking: false)
+            return (try? await backend.complete(req))?.text.trimmed
+        }
+    }
+
+    static func imageRequest(from text: String) -> ImageGenRequest {
+        let t = text.lowercased()
+        var req = ImageGenRequest(prompt: text)
+        if t.contains("vertical") || t.contains("portrait") || t.contains("phone wallpaper") || t.contains("9:16") { req.aspect = .portrait }
+        else if t.contains("landscape") || t.contains("wide") || t.contains("16:9") || t.contains("banner") { req.aspect = .landscape }
+        if let r = t.range(of: #"\b(two|three|four|2|3|4) (different )?(images|versions|variations|pictures|options|takes)"#, options: .regularExpression) {
+            let word = t[r].split(separator: " ").first.map(String.init) ?? ""
+            req.count = ["two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4][word] ?? 1
+        }
+        if t.contains("photo") || t.contains("realistic") { req.style = StylePreset.named("photo") }
+        else if t.contains("logo") { req.style = StylePreset.named("logo") }
+        else if t.contains("wallpaper") { req.style = StylePreset.named("wallpaper") }
+        else if t.contains("concept art") { req.style = StylePreset.named("concept") }
+        else if t.contains("product") { req.style = StylePreset.named("product") }
+        return req
+    }
+
+    static func videoRequest(from text: String) -> VideoGenRequest {
+        let t = text.lowercased()
+        var req = VideoGenRequest(prompt: text)
+        if let r = t.range(of: #"(\d+)[- ]?(second|sec|s\b)"#, options: .regularExpression),
+           let n = Int(t[r].prefix { $0.isNumber }) { req.durationSeconds = n }
+        if t.contains("vertical") || t.contains("portrait") || t.contains("9:16") || t.contains("tiktok") || t.contains("reel") { req.aspect = .portrait }
+        else if t.contains("square") { req.aspect = .square }
+        req.audio = t.contains("sound") || t.contains("audio") || t.contains("music") || t.contains("dialogue")
+        return req
     }
 
     static func primaryAgent(for p: TaskProfile) -> AgentRole {

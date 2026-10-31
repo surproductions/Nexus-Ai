@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import UIKit
+import ZIPFoundation
 
 /// Background, resumable model downloads with SHA-256 verification.
 @MainActor
@@ -93,7 +94,7 @@ final class DownloadManager: NSObject, ObservableObject {
         }
         HardwareMonitor.shared.refresh()
         let free = HardwareMonitor.shared.freeStorage
-        let needed = file.sizeBytes + 512 * 1_048_576
+        let needed = file.sizeBytes * (entry.modelKind == .imageDiffusion ? 2 : 1) + 512 * 1_048_576  // archives unpack in place
         guard free == 0 || free > needed else { throw NexusError.insufficientStorage(required: needed, available: free) }
 
         let key = "\(entry.id)|\(kind.rawValue)"
@@ -164,9 +165,20 @@ final class DownloadManager: NSObject, ObservableObject {
         guard let file = kind == .vision ? entry.visionProjector : entry.file else { return }
         items[key]?.status = .verifying
         let destination = kind == .vision ? ModelManager.projectorURL(entry)! : ModelManager.localURL(entry)
+        let isArchive = entry.modelKind == .imageDiffusion
         Task.detached(priority: .utility) {
-            let result = Self.verify(staged, expectedSize: file.sizeBytes, sha256: file.sha256)
+            var result = Self.verify(staged, expectedSize: file.sizeBytes, sha256: file.sha256)
+            if case .success = result, isArchive {
+                result = Self.unpackDiffusion(zip: staged, to: destination)
+            }
             await MainActor.run {
+                if isArchive, case .success = result {
+                    self.items[key]?.status = .completed
+                    self.items[key]?.written = file.sizeBytes
+                    self.tasks[key] = nil
+                    self.models?.rescan()
+                    return
+                }
                 switch result {
                 case .success:
                     try? FileManager.default.removeItem(at: destination)
@@ -200,6 +212,37 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
         items[key]?.status = resumeData != nil ? .paused : .failed(error.localizedDescription)
+    }
+
+    /// Unzips Core ML resources, locates the folder holding the .mlmodelc bundles and installs it at `destination`.
+    nonisolated static func unpackDiffusion(zip: URL, to destination: URL) -> Result<Void, Error> {
+        let fm = FileManager.default
+        let work = zip.deletingLastPathComponent().appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer {
+            try? fm.removeItem(at: work)
+            try? fm.removeItem(at: zip)
+        }
+        do {
+            try fm.createDirectory(at: work, withIntermediateDirectories: true)
+            try fm.unzipItem(at: zip, to: work)
+            guard let en = fm.enumerator(at: work, includingPropertiesForKeys: nil) else { throw NexusError.generic("Empty archive") }
+            var root: URL?
+            for case let url as URL in en where url.lastPathComponent == "TextEncoder.mlmodelc" {
+                root = url.deletingLastPathComponent()
+                break
+            }
+            guard let root else { throw NexusError.generic("The archive doesn't contain Core ML Stable Diffusion resources.") }
+            try? fm.removeItem(at: destination)
+            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.moveItem(at: root, to: destination)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var dest = destination
+            try? dest.setResourceValues(values)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
     }
 
     nonisolated static func verify(_ url: URL, expectedSize: Int64, sha256: String?) -> Result<Void, Error> {

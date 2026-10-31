@@ -7,6 +7,11 @@ enum WebResearch {
     private static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
 
     static func search(_ query: String, braveKey: String?, limit: Int = 6) async throws -> [SourceRef] {
+        // User-added connectors take priority (Settings → Connectors).
+        let registry = ConnectorRegistry.shared
+        if let fc = registry.enabled(.firecrawl), let r = try? await Firecrawl.search(query, config: fc, limit: min(limit, 5), scrape: true), !r.isEmpty { return r }
+        if let tv = registry.enabled(.tavily), let r = try? await Tavily.search(query, config: tv, limit: limit), !r.isEmpty { return r }
+        if let br = registry.enabled(.brave), let r = try? await BraveSearch.search(query, config: br, limit: limit), !r.isEmpty { return r }
         if let key = braveKey, !key.isEmpty {
             if let r = try? await brave(query, key: key, limit: limit), !r.isEmpty { return r }
         }
@@ -86,6 +91,10 @@ enum WebResearch {
     }
 
     static func fetch(_ urlString: String, maxChars: Int) async throws -> Page {
+        if let fc = ConnectorRegistry.shared.enabled(.firecrawl), let page = try? await Firecrawl.scrape(urlString, config: fc, maxChars: maxChars),
+           !page.text.isEmpty {
+            return page
+        }
         guard let url = URL(string: urlString), url.scheme == "https" || url.scheme == "http" else {
             throw NexusError.generic("Invalid URL: \(urlString)")
         }

@@ -37,6 +37,20 @@ enum ModelCapability: String, Codable, CaseIterable, Sendable {
     }
 }
 
+enum ModelKind: String, Codable, Sendable {
+    case llm             // chat/instruction model (GGUF)
+    case toolCaller      // function-calling specialist (GGUF), not used for chat
+    case imageDiffusion  // Core ML Stable Diffusion resources (zip, unpacked after verification)
+
+    var label: String {
+        switch self {
+        case .llm: return "Language model"
+        case .toolCaller: return "Tool-calling model"
+        case .imageDiffusion: return "Image generation"
+        }
+    }
+}
+
 struct ModelFile: Codable, Hashable, Sendable {
     var filename: String
     var url: URL
@@ -68,6 +82,10 @@ struct ModelEntry: Codable, Identifiable, Hashable, Sendable {
     var licenseURL: URL
     var notes: String
     var isCustom: Bool = false
+    /// nil = .llm (kept optional so entries saved by earlier versions still decode).
+    var kind: ModelKind? = nil
+    var modelKind: ModelKind { kind ?? .llm }
+    var isChatModel: Bool { modelKind == .llm }
 
     var supportsThinking: Bool { capabilities.contains(.thinking) }
     var supportsVision: Bool { visionProjector != nil }
@@ -97,6 +115,41 @@ enum ModelRegistry {
     /// Curated catalog. Weights are never bundled or redistributed: they download directly from the
     /// publisher's (or a well-known quantizer's) Hugging Face repository under the model's own license.
     static let catalog: [ModelEntry] = [
+        ModelEntry(
+            id: "lfm2.5-1.2b-q4km", name: "LFM2.5 1.2B", family: "LFM2.5", version: "2.5", publisher: "Liquid AI",
+            sourceRepo: "LiquidAI/LFM2.5-1.2B-Instruct-GGUF", parameterBillions: 1.2, quantization: "Q4_K_M",
+            file: hf("LiquidAI/LFM2.5-1.2B-Instruct-GGUF", "LFM2.5-1.2B-Instruct-Q4_K_M.gguf", 730_895_168,
+                     "b1b3de114215d9507409a662a501a631095a479a419584e8a2ded6304b19b4f5"),
+            visionProjector: nil,
+            nativeContext: 32_768, kvBytesPerToken: 12_288, promptFormat: .chatml,
+            capabilities: [.chat, .multilingual, .toolUse],
+            priors: ["quick": 6, "chat": 5, "reasoning": 4, "math": 4.5, "coding": 3.5, "research": 4.5, "document": 5, "vision": 0, "planning": 4, "creative": 5],
+            license: "LFM Open License v1.0", licenseURL: URL(string: "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/blob/main/LICENSE")!,
+            notes: "Hybrid convolution/attention edge model designed for very fast on-device decoding. Default Instant-mode model. License permits commercial use below a revenue threshold. Check the terms."),
+        ModelEntry(
+            id: "functiongemma-270m-q8", name: "FunctionGemma 270M", family: "FunctionGemma", version: "1", publisher: "Google DeepMind",
+            sourceRepo: "unsloth/functiongemma-270m-it-GGUF", parameterBillions: 0.27, quantization: "Q8_0",
+            file: hf("unsloth/functiongemma-270m-it-GGUF", "functiongemma-270m-it-Q8_0.gguf", 291_558_624,
+                     "8a17a4eda2b28eaf685a487129fd5295eeff3f722b9c6451dd3d98c18c23a98d"),
+            visionProjector: nil,
+            nativeContext: 32_768, kvBytesPerToken: 18_432, promptFormat: .functionGemma,
+            capabilities: [.toolUse],
+            priors: ["chat": 0],
+            license: "Gemma Terms of Use", licenseURL: URL(string: "https://ai.google.dev/gemma/terms")!,
+            notes: "Tiny function-calling specialist. NEXUS uses it only to map requests to tools (calculator, units, dates, search, image/video generation), never for chat. It is a base model that is not fine-tuned for NEXUS's tools, so its calls are validated before execution.",
+            kind: .toolCaller),
+        ModelEntry(
+            id: "sd-2.1-base-coreml", name: "Stable Diffusion 2.1 (Core ML)", family: "Stable Diffusion", version: "2.1-base", publisher: "Stability AI · Apple Core ML conversion",
+            sourceRepo: "apple/coreml-stable-diffusion-2-1-base-palettized", parameterBillions: 0.87, quantization: "6-bit palettized",
+            file: hf("apple/coreml-stable-diffusion-2-1-base-palettized", "coreml-stable-diffusion-2-1-base-palettized_split_einsum_v2_compiled.zip", 1_141_379_936,
+                     "90c532943d460c559a8d84b7a0f05a4d265fee78ca355fdd5aa734fd43e08972"),
+            visionProjector: nil,
+            nativeContext: 77, kvBytesPerToken: 0, promptFormat: .auto,
+            capabilities: [],
+            priors: [:],
+            license: "CreativeML Open RAIL++-M", licenseURL: URL(string: "https://huggingface.co/stabilityai/stable-diffusion-2-1-base/blob/main/LICENSE-MODEL")!,
+            notes: "Local text-to-image and image-to-image at 512×512 on the Neural Engine (split-einsum). Apple's built-in safety checker blocks unsafe outputs when included. The license prohibits certain uses.",
+            kind: .imageDiffusion),
         ModelEntry(
             id: "qwen3.5-0.8b-q4km", name: "Qwen3.5 0.8B", family: "Qwen3.5", version: "3.5", publisher: "Alibaba Qwen",
             sourceRepo: "unsloth/Qwen3.5-0.8B-GGUF", parameterBillions: 0.8, quantization: "Q4_K_M",

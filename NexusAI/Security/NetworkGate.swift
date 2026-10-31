@@ -10,12 +10,16 @@ final class NetworkGate: @unchecked Sendable {
         case modelDownload = "Model download"
         case webResearch = "Web research"
         case cloudInference = "Cloud inference"
+        case cloudGeneration = "Cloud image & video generation"
+        case connectors = "Connectors"
 
         var explanation: String {
             switch self {
             case .modelDownload: return "Downloads model weights from Hugging Face. Only the file request is sent; no personal data."
             case .webResearch: return "Sends your search query to the search provider and fetches the resulting pages."
             case .cloudInference: return "Sends the prompt, relevant context and attachments for that request to your configured provider."
+            case .cloudGeneration: return "Sends your generation prompt and any images you attach for that request to the selected provider (OpenAI or fal.ai). Videos you upload for analysis are never sent."
+            case .connectors: return "Sends queries and tool arguments to the connectors you added (e.g. Firecrawl, Tavily, MCP servers)."
             }
         }
     }
@@ -33,6 +37,8 @@ final class NetworkGate: @unchecked Sendable {
         var offlineOnly = false
         var allowWebResearch = false
         var allowCloud = false
+        var allowCloudGeneration = false
+        var allowConnectors = false
     }
 
     private let lock = NSLock()
@@ -74,6 +80,8 @@ final class NetworkGate: @unchecked Sendable {
         case .modelDownload: return true
         case .webResearch: return p.allowWebResearch
         case .cloudInference: return p.allowCloud
+        case .cloudGeneration: return p.allowCloudGeneration
+        case .connectors: return p.allowConnectors
         }
     }
 

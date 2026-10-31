@@ -96,6 +96,7 @@ enum PromptFormat: String, Codable, Sendable {
     case gemma4     // <|turn>role ... <turn|>, thinking via <|channel>thought
     case phi4       // <|system|> ... <|end|>
     case llama3     // <|start_header_id|> ... <|eot_id|>
+    case functionGemma // Gemma 3 turns with a developer role and function declarations
     case auto       // llama_chat_apply_template with the GGUF's embedded template
 
     var stopStrings: [String] {
@@ -104,6 +105,7 @@ enum PromptFormat: String, Codable, Sendable {
         case .gemma4: return ["<turn|>", "<|turn>", "<end_of_turn>"]
         case .phi4: return ["<|end|>", "<|user|>", "<|endoftext|>"]
         case .llama3: return ["<|eot_id|>", "<|start_header_id|>", "<|end_of_text|>"]
+        case .functionGemma: return ["<end_of_turn>", "<start_of_turn>"]
         case .auto: return []
         }
     }
@@ -156,6 +158,13 @@ enum PromptFormat: String, Codable, Sendable {
                 out += "<|start_header_id|>\(role)<|end_header_id|>\n\n\(body(m))<|eot_id|>"
             }
             out += "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        case .functionGemma:
+            if !system.isEmpty { out += "<start_of_turn>developer\n\(system)<end_of_turn>\n" }
+            for m in messages {
+                let role = m.role == .assistant ? "model" : "user"
+                out += "<start_of_turn>\(role)\n\(body(m))<end_of_turn>\n"
+            }
+            out += "<start_of_turn>model\n"
         case .auto:
             return nil
         }

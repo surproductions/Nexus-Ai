@@ -65,6 +65,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NEXUS can connect to a model server you host on your local network (for example Ollama or LM Studio) when you configure one.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>NEXUS saves images and videos you create to your Photos library when you choose Save to Photos.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>NEXUS can lock your conversations and memories behind Face ID.</string>
 </dict>
