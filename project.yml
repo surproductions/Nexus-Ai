@@ -1,0 +1,52 @@
+name: NexusAI
+options:
+  bundleIdPrefix: ai.nexus
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  NexusAI:
+    type: application
+    platform: iOS
+    sources:
+      - path: NexusAI
+    dependencies:
+      - framework: Vendor/llama.xcframework
+        embed: true
+      - sdk: Accelerate.framework
+      - sdk: Metal.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.nexus.assistant
+        PRODUCT_NAME: NexusAI
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS: "iphoneos"
+        ARCHS: arm64
+        CODE_SIGN_ENTITLEMENTS: NexusAI/Resources/NexusAI.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        OTHER_LDFLAGS: ["-weak_framework", "FoundationModels"]
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/Frameworks"]
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: NexusAI/Resources/Info.plist
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+schemes:
+  NexusAI:
+    build:
+      targets:
+        NexusAI: all
+    run:
+      config: Debug
+    archive:
+      config: Release

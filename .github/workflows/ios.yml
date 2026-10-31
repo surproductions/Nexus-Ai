@@ -1,0 +1,117 @@
+name: Build NEXUS AI (iOS)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned llama.cpp release. Its C API (include/llama.h, tools/mtmd/mtmd.h) is what
+  # NexusAI/Inference/Llama*.swift is written against. Bump deliberately.
+  LLAMA_TAG: b12018
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1); fi
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Fetch llama.cpp XCFramework (${{ env.LLAMA_TAG }})
+        run: |
+          set -euo pipefail
+          mkdir -p Vendor
+          URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-xcframework.zip"
+          if curl -fsSL -o llama.zip "$URL"; then
+            unzip -q llama.zip -d vendor_tmp
+            FW=$(find vendor_tmp -maxdepth 3 -name "llama.xcframework" -type d | head -1)
+            mv "$FW" Vendor/llama.xcframework
+          else
+            echo "Release asset unavailable; building the XCFramework from source"
+            git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp vendor_src
+            (cd vendor_src && ./build-xcframework.sh ios-device)
+            mv vendor_src/build-apple/llama.xcframework Vendor/llama.xcframework
+          fi
+          ls Vendor/llama.xcframework
+          shasum -a 256 llama.zip || true
+
+      - name: Generate Xcode project
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
+
+      - name: Build (Release, iphoneos, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NexusAI.xcodeproj -scheme NexusAI \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | grep -E "(error|fatal error):|\*\* BUILD" || true
+          if ! grep -q "\*\* BUILD SUCCEEDED \*\*" build.log; then
+            echo "================ COMPILER ERRORS ================"
+            grep -E "error:" build.log | sort -u | head -150
+            exit 1
+          fi
+
+      - name: Package IPA and verify
+        run: |
+          set -euo pipefail
+          APP=build/Build/Products/Release-iphoneos/NexusAI.app
+          test -d "$APP"
+          test -d "$APP/Frameworks/llama.framework"
+          lipo -info "$APP/NexusAI"
+          otool -L "$APP/NexusAI" | grep -E "llama|FoundationModels" || true
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          zip -qry NexusAI.ipa Payload
+          unzip -l NexusAI.ipa | tail -3
+          shasum -a 256 NexusAI.ipa | tee NexusAI.ipa.sha256
+          # Complete, buildable Xcode project (generated project + vendored framework + sources)
+          zip -qry NexusAI-XcodeProject.zip NexusAI NexusAI.xcodeproj Vendor project.yml README.md docs -x "*.DS_Store"
+          ls -la NexusAI.ipa NexusAI-XcodeProject.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexusAI-ipa
+          path: |
+            NexusAI.ipa
+            NexusAI.ipa.sha256
+
+      - name: Publish GitHub release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          {
+            echo "Automated unsigned build of NEXUS AI from commit ${GITHUB_SHA}."
+            echo
+            echo "- Built with: $(xcodebuild -version | head -1), iOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
+            echo "- llama.cpp: ${LLAMA_TAG}"
+            echo "- IPA SHA-256: $(cut -d' ' -f1 NexusAI.ipa.sha256)"
+            echo
+            echo "The IPA is unsigned. Install it with a re-signing sideloader (AltStore, SideStore, Sideloadly)"
+            echo "or sign it with your own Apple Developer account. See docs/INSTALL.md."
+          } > notes.md
+          gh release create "$TAG" NexusAI.ipa NexusAI.ipa.sha256 NexusAI-XcodeProject.zip \
+            --title "NEXUS AI 1.0 (build ${{ github.run_number }})" --notes-file notes.md --latest
