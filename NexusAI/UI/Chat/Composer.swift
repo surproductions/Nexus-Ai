@@ -20,7 +20,11 @@ struct Composer: View {
                     HStack(spacing: 8) {
                         ForEach(chat.pending) { p in
                             ZStack(alignment: .topTrailing) {
-                                if let thumb = p.thumbnail {
+                                if p.kind == .video {
+                                    Label(p.filename, systemImage: "film").font(.caption).lineLimit(1)
+                                        .frame(maxWidth: 160).padding(10)
+                                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                                } else if let thumb = p.thumbnail {
                                     Image(uiImage: thumb).resizable().scaledToFill().frame(width: 58, height: 58)
                                         .clipShape(RoundedRectangle(cornerRadius: 10))
                                 } else {
@@ -42,7 +46,7 @@ struct Composer: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 Menu {
-                    Button { showPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+                    Button { showPhotos = true } label: { Label("Photos & Videos", systemImage: "photo.on.rectangle") }
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
                         Button { showCamera = true } label: { Label("Camera", systemImage: "camera") }
                     }
@@ -100,15 +104,26 @@ struct Composer: View {
         .padding(.top, 4)
         .background(.bar)
         .onChange(of: dictation.text) { t in if !t.isEmpty { chat.draft = t } }
-        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 4, matching: .images)
+        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { items in
             Task {
-                for item in items { await chat.addPhotoItem(item) }
+                for item in items {
+                    if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }),
+                       let movie = try? await item.loadTransferable(type: PickedMovie.self) {
+                        chat.addVideo(movie.url)
+                    } else {
+                        await chat.addPhotoItem(item)
+                    }
+                }
                 photoItems = []
             }
         }
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: DocumentStore.supportedTypes, allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { urls.forEach { chat.addDocument($0) } }
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: DocumentStore.supportedTypes + [.movie], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                for url in urls {
+                    if (UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie)) == true { chat.addVideo(url) } else { chat.addDocument(url) }
+                }
+            }
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { image in chat.addImage(image, name: "Camera") }.ignoresSafeArea()
@@ -167,7 +182,7 @@ struct ModelPickerSheet: View {
                     if AppleIntelligence.isAvailable {
                         row(id: AppleFoundationBackend.modelID, title: "Apple Intelligence", subtitle: "Built-in on-device model · no download", symbol: "apple.logo")
                     }
-                    ForEach(ModelRegistry.allEntries.filter { models.isInstalled($0.id) }) { e in
+                    ForEach(ModelRegistry.allEntries.filter { $0.isChatModel && models.isInstalled($0.id) }) { e in
                         row(id: e.id, title: e.name, subtitle: "\(e.quantization) · \(ByteCountFormatter.file(e.file.sizeBytes))\(models.visionInstalled.contains(e.id) ? " · vision" : "")", symbol: "cpu")
                     }
                     if models.installed.isEmpty && !AppleIntelligence.isAvailable {

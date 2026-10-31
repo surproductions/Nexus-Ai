@@ -11,13 +11,16 @@ struct WorkspaceView: View {
                 Picker("", selection: $segment) {
                     Text("Research").tag(0)
                     Text("Documents").tag(1)
+                    Text("Memory").tag(2)
                 }
                 .pickerStyle(.segmented)
                 .padding()
                 if segment == 0 {
                     ResearchView(orchestrator: app.orchestrator, settings: app.settings)
-                } else {
+                } else if segment == 1 {
                     DocumentsView(documents: app.documents, orchestrator: app.orchestrator)
+                } else {
+                    MemoryView(memory: app.memory, settings: app.settings, embedded: true)
                 }
             }
             .navigationTitle("Workspace")

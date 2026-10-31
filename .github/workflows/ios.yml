@@ -43,6 +43,7 @@ jobs:
             NexusAI/Tools/Calculator.swift NexusAI/Inference/InferenceTypes.swift \
             NexusAI/Routing/TaskClassifier.swift NexusAI/Reasoning/Agents.swift \
             NexusAI/Registry/ModelRegistry.swift NexusAI/Memory/Embedder.swift \
+            NexusAI/Reasoning/FunctionCaller.swift NexusAI/Registry/ModePolicy.swift \
             -o logictests
           ./logictests
 

@@ -22,3 +22,5 @@ extension String {
 }
 
 enum IntelligenceMode: String, Codable, CaseIterable, Sendable { case instant, thinking, max }
+
+enum AppleFoundationBackend { static let modelID = "apple.foundation" }

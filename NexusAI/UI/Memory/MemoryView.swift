@@ -5,6 +5,8 @@ struct MemoryView: View {
     @EnvironmentObject var app: AppModel
     @ObservedObject var memory: MemoryStore
     @ObservedObject var settings: SettingsStore
+    /// When embedded in Workspace (which already provides a NavigationStack).
+    var embedded = false
     @State private var segment = 0
     @State private var query = ""
     @State private var editing: MemoryItem?
@@ -16,7 +18,10 @@ struct MemoryView: View {
     @State private var confirmWipe = false
 
     var body: some View {
-        NavigationStack {
+        if embedded { content } else { NavigationStack { content } }
+    }
+
+    private var content: some View {
             VStack(spacing: 0) {
                 Picker("", selection: $segment) {
                     Text("Memories").tag(0)
@@ -26,7 +31,7 @@ struct MemoryView: View {
                 .padding()
                 if segment == 0 { memoriesList } else { projectsList }
             }
-            .navigationTitle("Memory")
+            .navigationTitle(embedded ? "Workspace" : "Memory")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -59,7 +64,6 @@ struct MemoryView: View {
             .confirmationDialog("Delete all memories?", isPresented: $confirmWipe, titleVisibility: .visible) {
                 Button("Delete all", role: .destructive) { memory.deleteAll() }
             } message: { Text("This permanently removes everything NEXUS remembers. Conversations are kept.") }
-        }
     }
 
     private func export() {

@@ -175,6 +175,7 @@ struct ModelRow: View {
                 Text("\(entry.publisher) · \(Calculator.format(entry.parameterBillions))B · \(entry.quantization) · \(ByteCountFormatter.file(entry.file.sizeBytes))")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 4) {
+                    if entry.modelKind != .llm { Pill(text: entry.modelKind.label, tint: .purple) }
                     ForEach(entry.capabilities.filter { [.reasoning, .coding, .vision, .thinking].contains($0) }, id: \.self) { c in
                         Pill(text: c.label)
                     }

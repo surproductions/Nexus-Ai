@@ -106,5 +106,47 @@ check(Embedder.cosine(a, b) > Embedder.cosine(a, c), "Semantic similarity orderi
 check(abs(Embedder.cosine(a, a) - 1) < 1e-3, "Self-similarity ≈ 1")
 check(Embedder.decode(Embedder.encode(a)) == a, "Embedding round-trip encoding")
 
+
+// MARK: Creative intent & media edits
+check(TaskClassifier.classify("Create a cinematic 10-second video of a futuristic city at night with flying vehicles").creativeIntent == .video, "Detect video generation")
+check(TaskClassifier.classify("Generate an image of a red fox in the snow").creativeIntent == .image, "Detect image generation")
+check(TaskClassifier.classify("Please draw a minimalist logo for a coffee shop").creativeIntent == .image, "Detect drawing request")
+check(TaskClassifier.classify("How do I make an image smaller in Photoshop?").creativeIntent == .none, "Question about images is not generation")
+check(TaskClassifier.classify("What is in this video?", hasImages: false).creativeIntent == .none, "Video question is not generation")
+check(TaskClassifier.classify("Make the lighting warmer").wantsMediaEdit, "Detect edit instruction")
+check(TaskClassifier.classify("Create a vertical version for social media").wantsMediaEdit, "Detect vertical version edit")
+check(!TaskClassifier.classify("Explain photosynthesis").wantsMediaEdit, "No edit in plain question")
+
+// MARK: FunctionGemma call parsing & validation
+let fc = FunctionCallParser.parse("<start_function_call>call:calculator{expression:<escape>12*7<escape>}<end_function_call>")
+check(fc?.name == "calculator" && fc?.primaryArgument == "12*7", "Parse FunctionGemma call (got \(String(describing: fc)))")
+let fc2 = FunctionCallParser.parse("call:web_search{query:<escape>latest iPhone news<escape>}")
+check(fc2?.name == "web_search" && fc2?.arguments["query"] == "latest iPhone news", "Parse call without wrapper tags")
+check(FunctionCallParser.parse("The answer is 4.") == nil, "No call in plain text")
+let mathProfile = TaskClassifier.classify("What is 12 times 7?")
+check(FunctionCallParser.validate(ProposedCall(name: "calculator", arguments: ["expression": "12*7"]), profile: mathProfile, webAllowed: false), "Valid calculator call accepted")
+check(!FunctionCallParser.validate(ProposedCall(name: "calculator", arguments: ["expression": "twelve"]), profile: mathProfile, webAllowed: false), "Invalid expression rejected")
+check(!FunctionCallParser.validate(ProposedCall(name: "generate_image", arguments: ["prompt": "a cat"]), profile: mathProfile, webAllowed: false), "Image call rejected without creative intent")
+check(!FunctionCallParser.validate(ProposedCall(name: "web_search", arguments: ["query": "x"]), profile: TaskClassifier.classify("latest news today"), webAllowed: false), "Web call rejected when web is off")
+let decl = FunctionCallParser.prompt(declarations: FunctionCallParser.declarations, request: "hi")
+check(decl.hasPrefix("<start_of_turn>developer\nYou are a model that can do function calling") && decl.hasSuffix("<start_of_turn>model\n"), "FunctionGemma prompt shape")
+
+// MARK: Mode policies reference real models
+for c in MemoryClass.allCases {
+    let p = ModePolicy.defaults(for: c)
+    for id in p.instant + p.thinking + p.max where id != "apple.foundation" {
+        check(ModelRegistry.catalog.contains { $0.id == id && $0.isChatModel }, "\(c.rawValue) policy model \(id) exists and is a chat model")
+    }
+    if let t = p.toolCaller { check(ModelRegistry.catalog.contains { $0.id == t && $0.modelKind == .toolCaller }, "Tool caller \(t) exists") }
+}
+check(ModePolicy.defaults(for: .gb12).instant.first == "lfm2.5-1.2b-q4km", "Instant prefers LFM2.5")
+check(ModePolicy.defaults(for: .gb12).thinking.first == "gemma-4-e2b-q4km", "Thinking prefers Gemma 4 E2B")
+check(ModePolicy.defaults(for: .gb12).max.first == "qwen3.5-4b-q4km", "Max prefers Qwen3.5 4B")
+check(MemoryClass.detect(physicalMemory: 12 * 1_073_741_824) == .gb12, "12 GB device class (iPhone 18 Pro Max)")
+check(MemoryClass.detect(physicalMemory: 8 * 1_073_741_824) == .gb8, "8 GB device class")
+check(ModelRegistry.catalog.filter { $0.modelKind == .imageDiffusion }.count == 1, "One diffusion entry")
+let fg = PromptFormat.functionGemma.render(system: "S", messages: [PromptMessage(role: .user, content: "Q")], thinking: false, imageMarker: "")!
+check(fg == "<start_of_turn>developer\nS<end_of_turn>\n<start_of_turn>user\nQ<end_of_turn>\n<start_of_turn>model\n", "FunctionGemma chat format")
+
 print("Logic tests: \(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

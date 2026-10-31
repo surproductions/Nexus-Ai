@@ -125,7 +125,7 @@ final class MediaLibrary: ObservableObject {
         for sub in ["images", "videos"] { try? FileManager.default.removeItem(at: Paths.attachments.appendingPathComponent(sub)) }
     }
 
-    static func thumbnail(for item: MediaItem, maxSide: CGFloat = 400) -> UIImage? {
+    nonisolated static func thumbnail(for item: MediaItem, maxSide: CGFloat = 400) -> UIImage? {
         if item.kind == .image { return UIImage(contentsOfFile: item.url.path)?.preparingThumbnail(of: CGSize(width: maxSide, height: maxSide)) }
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: item.url))
         gen.appliesPreferredTrackTransform = true

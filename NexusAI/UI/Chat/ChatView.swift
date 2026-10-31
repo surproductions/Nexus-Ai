@@ -12,11 +12,19 @@ struct ChatView: View {
     @State private var showVoice = false
     @State private var showModelPicker = false
     @State private var traceMessage: ChatMessage?
+    @State private var seek: SeekTarget?
+
+    struct SeekTarget: Identifiable { var id = UUID(); var url: URL; var time: Double }
+
+    private var latestVideoURL: URL? {
+        chat.conversation.messages.flatMap(\.attachments).last { $0.kind == .video }?.fileURL
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ModeSelector(mode: Binding(get: { chat.mode }, set: { chat.mode = $0 }))
+                ModeSelector(mode: Binding(get: { chat.mode }, set: { chat.mode = $0 }),
+                             connected: settings.cloudForMax && settings.allowCloud && !settings.offlineOnly && settings.activeProvider != nil)
                     .padding(.horizontal)
                     .padding(.top, 6)
                 StatusStrip(chat: chat, models: models, settings: settings)
@@ -58,6 +66,7 @@ struct ChatView: View {
             .sheet(item: $traceMessage) { msg in
                 TraceSheet(message: msg)
             }
+            .sheet(item: $seek) { target in VideoSeekSheet(url: target.url, time: target.time) }
             .fullScreenCover(isPresented: $showVoice) {
                 VoiceView(chat: chat, settings: settings)
             }
@@ -76,7 +85,9 @@ struct ChatView: View {
                         MessageRow(message: msg, showThinking: settings.showThinking,
                                    onTrace: { traceMessage = msg },
                                    onRegenerate: msg.id == chat.conversation.messages.last?.id && msg.role == .assistant ? { chat.regenerate() } : nil,
-                                   onDelete: { chat.delete(msg) })
+                                   onDelete: { chat.delete(msg) },
+                                   videoURL: latestVideoURL,
+                                   onSeek: { url, t in seek = SeekTarget(url: url, time: t) })
                             .id(msg.id)
                     }
                     if let session = chat.session {
@@ -101,6 +112,7 @@ struct ChatView: View {
 
 struct ModeSelector: View {
     @Binding var mode: IntelligenceMode
+    var connected = false
     @Namespace private var ns
 
     var body: some View {
@@ -112,7 +124,8 @@ struct ModeSelector: View {
                     VStack(spacing: 1) {
                         HStack(spacing: 4) {
                             Image(systemName: m.symbol).imageScale(.small)
-                            Text(m.shortTitle).font(.subheadline.weight(.semibold))
+                            Text(m == .max && connected ? "Max · Connected" : m.shortTitle).font(.subheadline.weight(.semibold))
+                                .lineLimit(1).minimumScaleFactor(0.75)
                         }
                         Text(m.subtitle).font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
                             .foregroundStyle(mode == m ? Color.primary.opacity(0.7) : .secondary)
@@ -169,9 +182,9 @@ struct StatusStrip: View {
         if case .loading(let id, let p) = models.loadState {
             return "Loading \(ModelRegistry.entry(id)?.name ?? id) \(Int(p * 100))%"
         }
-        if let r = chat.session?.route { return r.name }
-        if let name = chat.lastMeta?.modelName, !name.isEmpty { return name }
-        if let e = models.loadedEntry { return e.name }
+        if let r = chat.session?.route { return (r.isOnDevice ? "Local · " : "Remote · ") + r.name }
+        if let meta = chat.lastMeta, !meta.modelName.isEmpty { return (meta.usedCloud ? "Remote · " : "Local · ") + meta.modelName }
+        if let e = models.loadedEntry { return "Local · " + e.name }
         if !settings.modelOverride.isEmpty { return ModelRegistry.entry(settings.modelOverride)?.name ?? "Manual model" }
         return "Automatic routing"
     }

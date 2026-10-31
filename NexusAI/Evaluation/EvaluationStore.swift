@@ -173,6 +173,55 @@ final class EvaluationStore: ObservableObject {
         save(run)
     }
 
+    // MARK: Auto-configuration from on-device measurements
+
+    static let quickCaseIDs = ["r1", "r3", "r6", "r9", "c1", "c4", "g1", "g3", "g8", "g9"]
+
+    /// Benchmarks and quick-evaluates every installed chat model, then writes a measured mode policy.
+    func autoConfigure(orchestrator: Orchestrator, memoryClass: MemoryClass) async -> String {
+        var candidates: [(String, String, Double)] = []   // id, name, params (B)
+        if AppleIntelligence.isAvailable { candidates.append((AppleFoundationBackend.modelID, "Apple Intelligence", 3)) }
+        for e in ModelRegistry.allEntries where e.isChatModel && orchestrator.models.isInstalled(e.id) {
+            candidates.append((e.id, "\(e.name) \(e.quantization)", e.parameterBillions))
+        }
+        guard !candidates.isEmpty else { return "No installed models to measure. Download at least one model first." }
+        let cases = EvalSuite.cases.filter { Self.quickCaseIDs.contains($0.id) }
+        var measured: [(id: String, name: String, params: Double, pass: Double, tps: Double)] = []
+        var failures: [String] = []
+        for c in candidates {
+            if cancelFlag?.isCancelled == true { break }
+            do {
+                try await runBenchmark(modelID: c.0, mode: .instant, orchestrator: orchestrator)
+            } catch {
+                failures.append("\(c.1): \(error.localizedDescription)")
+                continue
+            }
+            await runSuite(modelID: c.0, modelName: c.1 + " (quick)", mode: .thinking, orchestrator: orchestrator, cases: cases)
+            let tps = benchmarks.first { $0.modelID == c.0 }?.decodeTokensPerSecond ?? 0
+            let pass = runs.first { $0.modelID == c.0 }?.passRate() ?? 0
+            measured.append((c.0, c.1, c.2, pass, tps))
+        }
+        guard !measured.isEmpty else { return "Measurement failed: " + failures.joined(separator: "; ") }
+        let maxTPS = max(1, measured.map { $0.tps }.max() ?? 1)
+        let instant = measured.filter { $0.pass >= 0.5 }.sorted { $0.tps > $1.tps }.map { $0.id }
+        let thinking = measured.sorted { (0.75 * $0.pass + 0.25 * $0.tps / maxTPS) > (0.75 * $1.pass + 0.25 * $1.tps / maxTPS) }.map { $0.id }
+        let maxList = measured.sorted { $0.pass != $1.pass ? $0.pass > $1.pass : $0.params > $1.params }.map { $0.id }
+        var policy = ModePolicyStore.load(memoryClass)
+        if !instant.isEmpty { policy.instant = instant }
+        policy.thinking = thinking
+        policy.max = maxList
+        policy.source = "measured \(Date().formatted(date: .abbreviated, time: .shortened))"
+        ModePolicyStore.save(policy, for: memoryClass)
+        let summary = measured.map { "\($0.name): \(Int($0.pass * 100))% pass, \(String(format: "%.1f", $0.tps)) tok/s" }.joined(separator: "\n")
+        return "Configured from measurements on this device.\nInstant → \(name(instant.first, measured))\nThinking → \(name(thinking.first, measured))\nMax → \(name(maxList.first, measured))\n\n\(summary)" +
+            (failures.isEmpty ? "" : "\n\nSkipped: " + failures.joined(separator: "; ")) +
+            (instant.isEmpty ? "\nNo model passed ≥50% of the quick suite, so Instant was left unchanged." : "")
+    }
+
+    private func name(_ id: String?, _ list: [(id: String, name: String, params: Double, pass: Double, tps: Double)]) -> String {
+        list.first { $0.id == id }?.name ?? "unchanged"
+    }
+
     // MARK: Performance benchmark
 
     func runBenchmark(modelID: String, mode: IntelligenceMode, orchestrator: Orchestrator) async throws {

@@ -29,10 +29,15 @@ struct SettingsView: View {
                         Slider(value: $settings.temperature, in: 0...1.2, step: 0.1)
                     }
                     NavigationLink { PersonaView(settings: settings) } label: { Label("Custom instructions", systemImage: "text.quote") }
+                    NavigationLink { ModelConfigView(models: app.models, settings: settings, evaluations: app.evaluations) } label: {
+                        Label("Model configuration", systemImage: "slider.horizontal.below.square.and.square.filled")
+                    }
                 }
                 Section("Privacy & data") {
                     NavigationLink { PrivacyView(settings: settings) } label: { Label("Privacy & network", systemImage: "hand.raised") }
                     NavigationLink { CloudProvidersView(settings: settings) } label: { Label("Cloud providers", systemImage: "cloud") }
+                    NavigationLink { ConnectorsView(store: app.connectors, settings: settings) } label: { Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted") }
+                    NavigationLink { CreativeProvidersView(creative: app.creative, settings: settings) } label: { Label("Generation providers", systemImage: "paintpalette") }
                 }
                 Section("Voice") {
                     NavigationLink { VoiceSettingsView(settings: settings) } label: { Label("Voice & speech", systemImage: "waveform") }
@@ -82,7 +87,9 @@ struct PrivacyView: View {
                 Toggle("Offline-Only mode", isOn: $settings.offlineOnly).tint(.orange)
                 Toggle("Web research", isOn: $settings.allowWebResearch).disabled(settings.offlineOnly)
                 Toggle("Cloud inference", isOn: $settings.allowCloud).disabled(settings.offlineOnly)
-                Toggle("Use cloud for Max Intelligence", isOn: $settings.cloudForMax).disabled(settings.offlineOnly || !settings.allowCloud)
+                Toggle("Connected Max (cloud for demanding Max tasks)", isOn: $settings.cloudForMax).disabled(settings.offlineOnly || !settings.allowCloud)
+                Toggle("Cloud image & video generation", isOn: $settings.allowCloudGeneration).disabled(settings.offlineOnly)
+                Toggle("Connectors (Firecrawl, MCP…)", isOn: $settings.allowConnectors).disabled(settings.offlineOnly)
                 Toggle("Allow cellular model downloads", isOn: $settings.allowCellularDownloads)
             } header: { Text("Network permissions") } footer: {
                 Text("Everything is off by default except model downloads. Nothing is uploaded silently: cloud requests only happen when you enable them, and each message that used the cloud is marked with a cloud badge.")
@@ -124,6 +131,19 @@ struct PrivacyView: View {
                 }
                 if !log.isEmpty { Button("Clear log", role: .destructive) { NetworkGate.shared.clearLog() } }
             } header: { Text("Network activity log (local only)") }
+            Section {
+                Picker("Keep uploaded photos & videos", selection: $settings.uploadRetentionDays) {
+                    Text("Until I delete them").tag(0)
+                    Text("30 days").tag(30)
+                    Text("7 days").tag(7)
+                    Text("1 day").tag(1)
+                }
+                Toggle("Transcribe video audio (on device)", isOn: $settings.transcribeVideoAudio)
+                StatRow(label: "Uploaded media", value: ByteCountFormatter.file(MediaLibrary.uploadsUsage()))
+                Button("Delete uploaded photos & videos now", role: .destructive) { MediaLibrary.clearUploads() }
+            } header: { Text("Uploaded media") } footer: {
+                Text("Photos and videos you attach are stored encrypted on this device for follow-up questions. Analysis text stays with the conversation. Generated media in the Studio library is managed separately.")
+            }
             Section {
                 Button("Delete all conversations, memories and documents", role: .destructive) { confirmWipe = true }
             }

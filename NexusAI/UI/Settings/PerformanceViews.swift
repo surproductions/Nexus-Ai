@@ -73,7 +73,7 @@ struct BenchmarksView: View {
     private var targets: [(String, String)] {
         var t: [(String, String)] = []
         if AppleIntelligence.isAvailable { t.append((AppleFoundationBackend.modelID, "Apple Intelligence")) }
-        for e in ModelRegistry.allEntries where models.isInstalled(e.id) { t.append((e.id, "\(e.name) \(e.quantization)")) }
+        for e in ModelRegistry.allEntries where e.isChatModel && models.isInstalled(e.id) { t.append((e.id, "\(e.name) \(e.quantization)")) }
         if let p = app.settings.activeProvider, app.settings.allowCloud, !app.settings.offlineOnly { t.append(("cloud", "\(p.name) (cloud)")) }
         return t
     }

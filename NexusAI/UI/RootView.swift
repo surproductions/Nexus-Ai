@@ -10,14 +10,14 @@ struct RootView: View {
             TabView(selection: $app.selectedTab) {
                 ChatView(chat: app.chat, settings: app.settings, models: app.models, memory: app.memory)
                     .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }.tag(0)
+                StudioView(creative: app.creative, library: app.library)
+                    .tabItem { Label("Studio", systemImage: "paintpalette") }.tag(1)
                 WorkspaceView()
-                    .tabItem { Label("Workspace", systemImage: "square.stack.3d.up") }.tag(1)
+                    .tabItem { Label("Workspace", systemImage: "square.stack.3d.up") }.tag(3)
                 ModelsView(models: app.models, downloads: app.downloads)
                     .tabItem { Label("Models", systemImage: "cpu") }
                     .badge(app.downloads.activeCount)
                     .tag(2)
-                MemoryView(memory: app.memory, settings: app.settings)
-                    .tabItem { Label("Memory", systemImage: "brain") }.tag(3)
                 SettingsView(settings: app.settings)
                     .tabItem { Label("Settings", systemImage: "gearshape") }.tag(4)
             }

@@ -6,7 +6,25 @@ struct MessageRow: View {
     var onTrace: () -> Void
     var onRegenerate: (() -> Void)?
     var onDelete: () -> Void
+    /// Video in the conversation that timestamps in this message refer to.
+    var videoURL: URL? = nil
+    var onSeek: ((URL, Double) -> Void)? = nil
     @State private var thinkingExpanded = false
+
+    private var timestamps: [Double] {
+        guard videoURL != nil, let re = try? NSRegularExpression(pattern: #"\b(\d{1,2}):([0-5]\d)\b"#) else { return [] }
+        let text = message.content
+        var seen = Set<Int>()
+        var out: [Double] = []
+        for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let r1 = Range(m.range(at: 1), in: text), let r2 = Range(m.range(at: 2), in: text),
+                  let mm = Int(text[r1]), let ss = Int(text[r2]) else { continue }
+            let t = mm * 60 + ss
+            if seen.insert(t).inserted { out.append(Double(t)) }
+            if out.count >= 10 { break }
+        }
+        return out
+    }
 
     var body: some View {
         if message.role == .user {
@@ -21,7 +39,7 @@ struct MessageRow: View {
             Spacer(minLength: 48)
             VStack(alignment: .trailing, spacing: 6) {
                 if !message.attachments.isEmpty {
-                    AttachmentStrip(attachments: message.attachments)
+                    AttachmentStrip(attachments: message.attachments, onPlay: { url in onSeek?(url, 0) })
                 }
                 Text(message.content)
                     .padding(.horizontal, 14)
@@ -42,6 +60,20 @@ struct MessageRow: View {
                 ThinkingDisclosure(text: thinking, expanded: $thinkingExpanded, live: false)
             }
             MarkdownView(text: message.content)
+            if !message.attachments.isEmpty {
+                AttachmentStrip(attachments: message.attachments, large: true, onPlay: { url in onSeek?(url, 0) })
+            }
+            if let videoURL, !timestamps.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(timestamps, id: \.self) { t in
+                            Button { onSeek?(videoURL, t) } label: { Label(VideoDossier.stamp(t), systemImage: "play.circle") }
+                                .font(.caption.monospacedDigit()).buttonStyle(.bordered).controlSize(.small)
+                                .accessibilityLabel("Play video at \(VideoDossier.stamp(t))")
+                        }
+                    }
+                }
+            }
             if let meta = message.meta {
                 if !meta.warnings.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -213,17 +245,44 @@ struct SourcesView: View {
 
 struct AttachmentStrip: View {
     var attachments: [Attachment]
+    var large = false
+    var onPlay: ((URL) -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(attachments) { a in
-                if a.kind == .image, let img = UIImage(contentsOfFile: Paths.attachments.appendingPathComponent(a.relativePath).path) {
-                    Image(uiImage: img).resizable().scaledToFill().frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .accessibilityLabel("Attached image")
-                } else {
-                    Label(a.filename, systemImage: "doc.text").font(.caption).lineLimit(1)
-                        .padding(8).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(attachments) { a in
+                    switch a.kind {
+                    case .image:
+                        if let img = UIImage(contentsOfFile: a.fileURL.path) {
+                            Image(uiImage: img).resizable().scaledToFill()
+                                .frame(width: large ? 220 : 72, height: large ? 220 : 72)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .contextMenu {
+                                    ShareLink(item: a.fileURL) { Label("Share", systemImage: "square.and.arrow.up") }
+                                }
+                                .accessibilityLabel(a.mediaID != nil ? "Generated image \(a.filename)" : "Attached image \(a.filename)")
+                        } else {
+                            Label(a.filename, systemImage: "photo").font(.caption)
+                        }
+                    case .video:
+                        Button { onPlay?(a.fileURL) } label: {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.85))
+                                VStack(spacing: 4) {
+                                    Image(systemName: "play.circle.fill").font(.title)
+                                    Text(a.filename).font(.caption2).lineLimit(1)
+                                }
+                                .foregroundStyle(.white).padding(6)
+                            }
+                            .frame(width: large ? 220 : 110, height: large ? 124 : 72)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Play video \(a.filename)")
+                    case .document:
+                        Label(a.filename, systemImage: "doc.text").font(.caption).lineLimit(1)
+                            .padding(8).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                    }
                 }
             }
         }
