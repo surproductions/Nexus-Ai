@@ -63,7 +63,7 @@ final class AppleFoundationBackend: InferenceBackend, @unchecked Sendable {
                     let prompt = history.isEmpty ? last : "Conversation so far:\n\(history)User: \(last)"
                     let session = LanguageModelSession(instructions: request.system)
                     let options = GenerationOptions(temperature: Double(request.temperature),
-                                                    maximumResponseTokens: request.maxTokens)
+                                                    maximumResponseTokens: min(request.maxTokens, 1536))  // 4K total context
                     let start = Date()
                     var first: Date?
                     var emitted = ""

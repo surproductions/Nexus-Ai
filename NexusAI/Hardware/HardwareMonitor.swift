@@ -86,6 +86,13 @@ final class HardwareMonitor: ObservableObject {
         timer = nil
     }
 
+    /// Cheap memory-only refresh used by admission checks (called for every routing candidate).
+    func refreshMemory() {
+        availableMemory = UInt64(os_proc_available_memory())
+        appFootprint = Self.currentFootprint()
+        thermalState = ProcessInfo.processInfo.thermalState
+    }
+
     func refresh() {
         availableMemory = UInt64(os_proc_available_memory())
         appFootprint = Self.currentFootprint()
@@ -136,7 +143,7 @@ final class HardwareMonitor: ObservableObject {
     /// Admission control: refuses any load that would likely exceed the app's memory limit.
     /// `currentlyLoaded` is the footprint that will be freed if the active model is unloaded first.
     func canLoad(_ entry: ModelEntry, context: Int, vision: Bool, reclaimable: UInt64) -> (ok: Bool, required: UInt64, available: UInt64) {
-        refresh()
+        refreshMemory()
         let required = entry.estimatedMemory(context: context, withVision: vision)
         let available = availableMemory + reclaimable
         let safety: Double = thermalState == .critical ? 0.6 : 0.82

@@ -186,8 +186,12 @@ final class VoiceEngine: NSObject, ObservableObject {
     /// Feed streamed response text; complete sentences are spoken as soon as they arrive.
     func speak(delta: String) {
         pendingSpeech += delta
-        while let r = pendingSpeech.range(of: #"[.!?:;](\s|$)|\n"#, options: .regularExpression),
-              pendingSpeech.distance(from: pendingSpeech.startIndex, to: r.upperBound) > 12 {
+        // Speak each complete sentence as soon as it arrives (minimum ~12 characters per utterance so very short
+        // fragments are merged with the next sentence instead of blocking the queue).
+        while pendingSpeech.count > 12 {
+            let searchStart = pendingSpeech.index(pendingSpeech.startIndex, offsetBy: 12)
+            guard let r = pendingSpeech.range(of: #"[.!?:;](\s|$)|\n"#, options: .regularExpression,
+                                              range: searchStart..<pendingSpeech.endIndex) else { break }
             let sentence = String(pendingSpeech[..<r.upperBound])
             pendingSpeech = String(pendingSpeech[r.upperBound...])
             enqueue(sentence)

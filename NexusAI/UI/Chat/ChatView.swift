@@ -92,7 +92,7 @@ struct ChatView: View {
             .onChange(of: chat.conversation.messages.count) { _ in
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onChange(of: chat.session?.text.count ?? 0) { _ in
+            .onChange(of: chat.streamTick) { _ in
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
         }

@@ -20,6 +20,9 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isGenerating = false
     @Published var errorMessage: String?
     @Published var lastMeta: MessageMeta?
+    /// Throttled signal (≈4 Hz) that streamed text changed; drives auto-scroll without re-rendering per token.
+    @Published private(set) var streamTick = 0
+    private var lastTick = Date.distantPast
 
     let orchestrator: Orchestrator
     let store: ConversationStore
@@ -146,6 +149,10 @@ final class ChatViewModel: ObservableObject {
                 if !delta.isEmpty { self.onStreamDelta?(delta) }
             }
             lastText = new
+            if Date().timeIntervalSince(self.lastTick) > 0.25 {
+                self.lastTick = Date()
+                self.streamTick &+= 1
+            }
         } as AnyObject
 
         let input = TurnInput(text: text, images: images, attachments: saved, history: history, mode: conversation.mode,
