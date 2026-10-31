@@ -153,7 +153,7 @@ final class HardwareMonitor: ObservableObject {
         return nil
     }
 
-    static func currentFootprint() -> UInt64 {
+    nonisolated static func currentFootprint() -> UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
         let kr = withUnsafeMutablePointer(to: &info) {
